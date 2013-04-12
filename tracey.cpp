@@ -210,10 +210,10 @@ namespace tracey
         private:
         template<unsigned N>
         void safefmt( const std::string &fmt, std::string *t ) {
-            for( const auto &in : fmt ) {
-                unsigned index(in);
+            for( std::string::const_iterator it = fmt.begin(), end = fmt.end(); it != end; ++it ) {
+                unsigned index(*it);
                 if( index <= N ) t[0] += t[index];
-                else t[0] += in;
+                else t[0] += *it;
             }
             assign( t[0] );
         }
@@ -320,7 +320,7 @@ namespace tracey
         {
             std::string map( 256, '\0' );
 
-            for( auto it = chars.begin(), end = chars.end(); it != end; ++it )
+            for( std::string::const_iterator it = chars.begin(), end = chars.end(); it != end; ++it )
                 map[ *it ] = '\1';
 
             std::deque< string > tokens;

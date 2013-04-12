@@ -1,7 +1,7 @@
 tracey
 ======
 
-- Lightweight and simple memory leak finder. Requires C++11.
+- Lightweight and simple memory C++ leak finder.
 - Easy to integrate. No source modification is required.
 - Clean. Macroless and callstack based. No new/delete macro hacks.
 - Lazy. Should work out of the box. Plenty configuration options are provided anyways.
