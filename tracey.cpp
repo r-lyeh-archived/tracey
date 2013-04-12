@@ -938,28 +938,33 @@ $undefined(
 
 
 #ifndef kTraceyAllocMultiplier
-/*  to increase memory requirements, and to simulate and to debug worse memory conditions */
-/*  should be equal or bigger than 1                                                      */
-#   define kTraceyAllocMultiplier 1
+/*  Used to increase memory requirements, and to simulate and to debug worse memory conditions */
+/*  Should be equal or bigger than 1.0                                                         */
+#   define kTraceyAllocMultiplier 1.0
 #endif
 
 #ifndef kTraceyAlloc
-/*  Behaviour is undefined if kTraceyAlloc() implementation uses any global symbols */
-#   define kTraceyAlloc( x )     std::malloc( x )
+/*  Behaviour is undefined at end of program if kTraceyAlloc() implementation uses any global C++ symbol */
+#   define kTraceyAlloc(size)      std::malloc(size)
 #endif
 
 #ifndef kTraceyFree
-/*  Behaviour is undefined if kTraceyFree() implementation uses any global symbols */
-#   define kTraceyFree( x )      std::free( x )
+/*  Behaviour is undefined at end of program if kTraceyFree() implementation uses any global C++ symbol */
+#   define kTraceyFree(ptr)        std::free(ptr)
 #endif
 
 #ifndef kTraceyPrint
-/*  Behaviour is undefined if kTraceyPrint() implementation uses any global symbols, like std::cout */
-#   define kTraceyPrint( str )   fprintf( stderr, "%s", tracey::string( str ).c_str() )
+/*  Behaviour is undefined at end of program if kTraceyPrint() implementation uses any C++ global symbol, like std::cout */
+#   define kTraceyPrint(str)       fprintf( stderr, "%s", tracey::string( str ).c_str() )
 #endif
 
 #ifndef kTraceyAssert
-#   define kTraceyAssert( x )    assert( x )
+/*  Behaviour is undefined at end of program if kTraceyAssert() implementation uses any C++ global symbol */
+#   define kTraceyAssert(expr)     assert(expr)
+#endif
+
+#ifndef kTraceyBadAlloc
+#   define kTraceyBadAlloc()       std::bad_alloc()
 #endif
 
 #ifndef kTraceyReportWildPointers
@@ -1153,6 +1158,8 @@ namespace tracey
 
                             current = (size_t)( ++ibegin * 100.0 / iend );
 
+                            /* @todo: move this to an user-defined callback { */
+
                             tracey::string  line( "\1) Leak \2 bytes [\3] backtrace \4/\5 (\6%)\r\n", ibegin, the_leak->size, the_address, ibegin, iend, percent = current );
                             tracey::strings lines = tracey::string( the_callstack->str("\2\n", 2) ).tokenize("\n");
 
@@ -1160,6 +1167,8 @@ namespace tracey
                                 line += tracey::string( "\t\1\r\n", lines[i] );
 
                             kTraceyPrint( line );
+
+                            /* }: @todo */
 
                             body += line;
                         }
@@ -1274,6 +1283,10 @@ namespace tracey
             char unused;
             trace( &unused, (~0) - 1 );
         }
+        const char *version()
+        {
+            return "0.0-a";
+        }
     }
 }
 
@@ -1314,9 +1327,8 @@ void *operator new( size_t size ) //throw(std::bad_alloc)
     void *ptr = kTraceyAlloc( size*kTraceyAllocMultiplier );
 
     if( !ptr )
-        throw std::bad_alloc();
+        throw kTraceyBadAlloc();
 
-    kTraceyAssert(ptr);
     return tracey::trace( ptr, size );
 }
 
@@ -1325,9 +1337,8 @@ void *operator new[]( size_t size ) //throw(std::bad_alloc)
     void *ptr = kTraceyAlloc( size*kTraceyAllocMultiplier );
 
     if( !ptr )
-        throw std::bad_alloc();
+        throw kTraceyBadAlloc();
 
-    kTraceyAssert(ptr);
     return tracey::trace( ptr, size );
 }
 
@@ -1348,6 +1359,7 @@ void operator delete[]( void *ptr ) throw()
 #undef kTraceyFree
 #undef kTraceyPrint
 #undef kTraceyAssert
+#undef kTraceyBadAlloc
 
 #undef kTraceyDefineMemoryOperators
 #undef kTraceyReportWildPointers

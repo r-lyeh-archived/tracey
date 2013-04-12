@@ -53,4 +53,7 @@ namespace tracey
 
     // Report
     void report();
+
+    // Versioning
+    const char *version();
 }

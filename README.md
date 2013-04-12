@@ -6,24 +6,37 @@ tracey
 - Clean. Macroless and callstack based. No new/delete macro hacks.
 - Lazy. Should work out of the box. Plenty configuration options are provided anyways.
 - Tiny. One header and one source file.
-- Cross-platform. No extra dependencies.
+- Cross-platform. OS dependencies only. No third party dependencies.
 - MIT licensed.
 
 Implementation directives (optional)
 ------------------------------------
-- `kTraceyAlloc` defaults to `std::malloc()` if not overriden. All allocations merge to this symbol.
-- `kTraceyFree` defaults to `std::free()` if not overriden. All deallocations merge to this symbol.
-- `kTraceyPrint` defaults to `fprintf(stderr,...)` if not overriden. All reports merge to this symbol.
-- `kTraceyAssert` defaults to `assert()` if not overriden. All exceptions merge to this symbol.
+- `kTraceyAlloc(size)` defaults to `std::malloc(size)` if not overriden.
+  - All allocations merge to this symbol.
+- `kTraceyFree(ptr)` defaults to `std::free(ptr)` if not overriden.
+  - All deallocations merge to this symbol.
+- `kTraceyPrint(str)` defaults to `fprintf(stderr,"%s",str)` if not overriden.
+  - All warning and reports merge to this symbol.
+- `kTraceyAssert(expr)` defaults to `assert(expr)` if not overriden.
+  - All out-of-memory runtime asserts merge to this symbol.
+- `kTraceyBadAlloc()` defaults to `std::bad_alloc()` if not overriden.
+  - All out-of-memory runtime exceptions merge to this sysmbol.
 
 Configuration directives (optional)
 -----------------------------------
-- `kTraceyAllocMultiplier` defaults to `1` if not overriden (should be >= 1). Tracy uses this value to increase memory requirements, and to simulate and to debug worse memory conditions.
-- `kTraceyReportWildPointers` defaults to `1` if not overriden. When enabled, Tracey Warns about deallocations on pointers that have been not allocated by Tracey (wild pointers).
-- `kTraceyReportNullPointers` defaults to `0` if not overriden. When enabled, Tracey warns about deallocations on null pointers.
-- `kTraceyDefineMemoryOperators` defaults to `1` if not overriden. When enabled, Tracey implements all new/new[]/delete/delete[] operators.
-- `kTraceyEnabledOnStart` defaults to `1` if not overriden. When enabled, Tracey starts on app init.
-- `kTraceyReportOnExit` defaults to `1` if not overriden. When enabled, Tracey shows a report automatically on app exit.
+- `kTraceyAllocMultiplier` defaults to `1.0` if not overriden (should be >= 1.0).
+  - Tracey uses this value to increase memory requirements, and to simulate and to debug worse memory conditions.
+- `kTraceyReportWildPointers` defaults to `1` if not overriden (should be 0 or 1).
+  - When enabled, Tracey warns about deallocations on pointers that have been not allocated by Tracey (wild pointers).
+- `kTraceyReportNullPointers` defaults to `0` if not overriden (should be 0 or 1).
+  - When enabled, Tracey warns about deallocations on null pointers.
+- `kTraceyEnabledOnStart` defaults to `1` if not overriden (should be 0 or 1).
+  - When enabled, Tracey starts before application is running.
+- `kTraceyReportOnExit` defaults to `1` if not overriden (should be 0 or 1).
+  - When enabled, Tracey shows a report automatically on application exit.
+- `kTraceyDefineMemoryOperators` defaults to `1` if not overriden (should be 0 or 1).
+  - When enabled, Tracey implements all new([])/delete([]) operators.
+  - When disabled, used must provide de/allocation operators thru runtime API (see below).
 
 Runtime API (optional)
 ----------------------
@@ -35,6 +48,7 @@ Runtime API (optional)
 - `tracey::is_enabled()` returns Tracey's working status.
 - `tracey::invalidate()` tells Tracey to forget whole execution.
 - `tracey::report()` tells Tracey to show current report.
+- `tracey::version()` tells Tracey to return current version.
 
 Sample
 ------
