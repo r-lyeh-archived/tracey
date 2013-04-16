@@ -2,6 +2,8 @@
  * Simple and lightweight memory leak detector
  * Copyright (c) 2011,2012,2013 Mario 'rlyeh' Rodriguez
 
+ * Callstack code is based on code by Magnus Norddahl (ClanLib)
+
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
  * in the Software without restriction, including without limitation the rights
@@ -24,8 +26,9 @@
  * - tiny
  * - clean
  * - callstack based
+ * - lazy. should work with no source modification
  * - macroless API. no new/delete macros
- * - embeddable, just include this source in your project
+ * - embeddable. just include this source file in your project
 
  * To do:
  * - support for malloc/realloc/free
@@ -39,19 +42,27 @@
 
 #include <cassert>
 #include <cstddef>
+#include <cstdlib>
+#include <cstring>
+
+#include <algorithm>
+#include <cctype>
+#include <deque>
+#include <iomanip>
 #include <iostream>
+#include <limits>
 #include <map>
 #include <memory>
+#include <mutex>
 #include <new>
-
-// #include "tracey.inl" {
+#include <sstream>
+#include <string>
+#include <thread>
+#include <vector>
 
 // headers
 
 #ifdef _WIN32
-#   include <mutex>
-#   include <thread>
-//  --
 #   include <Windows.h>
 #   if defined(DEBUG) || defined(_DEBUG)
 #       include <crtdbg.h>
@@ -74,14 +85,7 @@
 #   endif
 //  --
 #   include <cxxabi.h>
-#   include <cstring>
-#   include <cstdlib>
 #endif
-
-#include <sstream>
-#include <string>
-#include <vector>
-#include <mutex>
 
 // messages
 
@@ -93,94 +97,92 @@
 #    warning "<tracey/tracey.cpp> says: do not forget -g -rdynamic compiler settings!"
 #endif
 
-// utils
+//    flag  | directives            | working?
+// ---------+-----------------------+-------------
+//    /MT   | _MT                   | no (crt)
+//    /MTd  | _MT && _DEBUG         | no (crt)
+//    /MD   | _MT && _DLL           | yes
+//    /MDd  | _MT && _DLL && _DEBUG | yes
+#if defined( _WIN32 ) && defined( _MSC_VER )
+#   if defined( _MT ) && !defined( _DLL )
+#       if !defined( _DEBUG )
+#           error Incompatible C Run-Time libraries compiler flag detected ( /MT ) : Use /MD instead
+#       else
+#           error Incompatible C Run-Time libraries compiler flag detected ( /MTd ) : Use /MDd instead
+#       endif
+#   endif
+#endif
+
+// OS utils
 
 #ifdef _WIN32
-#   define $windows(...)  __VA_ARGS__
+#   define $windows(...)   __VA_ARGS__
 #   define $welse(...)
-#   define $found
+#   define $defined
 #else
 #   define $windows(...)
-#   define $welse(...)    __VA_ARGS__
+#   define $welse(...)     __VA_ARGS__
 #endif
 
 #ifdef __APPLE__
-#   define $apple(...)    __VA_ARGS__
+#   define $apple(...)     __VA_ARGS__
 #   define $aelse(...)
-#   define $found
+#   define $defined
 #else
 #   define $apple(...)
-#   define $aelse(...)    __VA_ARGS__
+#   define $aelse(...)     __VA_ARGS__
 #endif
 
 #ifdef __linux__
-#   define $linux(...)    __VA_ARGS__
+#   define $linux(...)     __VA_ARGS__
 #   define $lelse(...)
-#   define $found
+#   define $defined
 #else
 #   define $linux(...)
-#   define $lelse(...)    __VA_ARGS__
+#   define $lelse(...)     __VA_ARGS__
 #endif
 
-#ifndef $found
+#ifndef $defined
 #   define $undefined(...) __VA_ARGS__
 #else
 #   define $undefined(...)
-#   undef  $found
+#   undef  $defined
 #endif
 
+// Compiler utils
+
 #ifdef __GNUC__
-#   define $gnuc(...)     __VA_ARGS__
+#   define $gnuc(...)      __VA_ARGS__
 #   define $gelse(...)
+#   define $defined
 #else
 #   define $gnuc(...)
-#   define $gelse(...)    __VA_ARGS__
+#   define $gelse(...)     __VA_ARGS__
 #endif
 
 #ifdef _MSC_VER
-#   define $msvc(...)     __VA_ARGS__
+#   define $msvc(...)      __VA_ARGS__
 #   define $melse(...)
+#   define $defined
 #else
 #   define $msvc(...)
-#   define $melse(...)    __VA_ARGS__
+#   define $melse(...)     __VA_ARGS__
 #endif
 
-/*
- * Extended C++ standard string
- * Copyright (c) 2010-2012, Mario 'rlyeh' Rodriguez
+#ifndef $defined
+#   define $other(...)     __VA_ARGS__
+#else
+#   define $other(...)
+#   undef  $defined
+#endif
 
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- * THE SOFTWARE.
-
- * - rlyeh
- */
-
-#pragma once
-
-#include <iomanip>
-#include <map>
-#include <sstream>
-#include <string>
-#include <vector>
-#include <deque>
-#include <algorithm>
-#include <cctype>       // std::toupper
-#include <limits>
+#if defined(NDEBUG) || defined(_NDEBUG)
+#   define $release(...) __VA_ARGS__
+#   define $debug(...)
+#else
+#   define $debug(...) __VA_ARGS__
+#   define $release(...)
+#endif
 
 namespace tracey
 {
@@ -469,56 +471,7 @@ namespace tracey
                 return out;
             }
     };
-}
 
-#include <iostream>
-
-std::ostream &operator <<( std::ostream &os, const tracey::strings &s );
-
-/*
- * Simple mutex class
- * Copyright (c) 2010 Mario 'rlyeh' Rodriguez
-
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- * THE SOFTWARE.
-
- * To do:
- * - never exclude/block when mutex.requester.this == mutex.owner.this
- * - synchronize( this ) { } / synchronized(this) { }
- * - _InterlockedCompareExchange() may be 150x faster than EnterCriticalSection():
- *   http://www.dreamincode.net/forums/topic/161166-microsoft-windows-thread-synchronization/
- *   http://wesnoth.repositoryhosting.com/trac/wesnoth_wesnoth/browser/trunk/Classes/Boost/regex_140/static_mutex.cpp?rev=8
-
- * - rlyeh
- */
-
-#pragma once
-
-#include <cassert>
-
-#include <algorithm>
-#include <map>
-#include <mutex>
-#include <thread>
-#include <vector>
-
-namespace tracey
-{
     // Block/unblock local resource to grant current thread exclusive access
     // Block/unblock a shared/global resource to grant current thread exclusive access
 
@@ -584,82 +537,32 @@ $lelse(
         mutex( const mutex & );
         mutex& operator=( const mutex & );
     };
-}
 
-/*
- * Simple name demangler. MIT licensed.
- * Copyright (c) 2011 Mario 'rlyeh' Rodriguez
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- * THE SOFTWARE.
-
- * - rlyeh
- */
-
-#include <string>
-
-#if defined(_WIN32)
-#   include <Windows.h>
-#   include <Dbghelp.h>
-#   pragma comment(lib, "dbghelp.lib")
-    namespace tracey {
     std::string demangle( const std::string &name ) {
+        $windows(
         char demangled[1024];
         return (UnDecorateSymbolName(name.c_str(), demangled, sizeof( demangled ), UNDNAME_COMPLETE)) ? demangled : name;
-    }}
-#elif defined(__GNUC__) // && defined(HAVE_CXA_DEMANGLE)
-#   include <cxxabi.h>
-    namespace tracey {
-    std::string demangle( const std::string &name ) {
+        )
+        $gnuc(
         char demangled[1024];
         size_t sz = sizeof(demangled);
         int status;
         abi::__cxa_demangle(name.c_str(), demangled, &sz, &status);
         return !status ? demangled : name;
-    }}
-#elif defined(__linux__)
-#   include <cstdio>
-    namespace tracey {
-    std::string demangle( const std::string &name ) {
+        )
+        $linux(
         FILE *fp = popen( (std::string("echo -n \"") + name + std::string("\" | c++filt" )).c_str(), "r" );
         if (!fp) { return name; }
         char demangled[1024];
         char *line_p = fgets(demangled, sizeof(demangled), fp);
         pclose(fp);
         return line_p;
-    }}
-#else
-    namespace tracey {
-    std::string demangle( const std::string &name ) {
+        )
+        $undefined(
         return name;
-    }}
-#endif
+        )
+    }
 
-/* Simple callstack class. Based on code by Magnus Norddahl (ClanLib). MIT licensed
- * - rlyeh
- */
-
-#pragma once
-
-#include <string>
-
-namespace tracey
-{
     class callstack
     {
         public:
@@ -676,11 +579,7 @@ namespace tracey
             void *frames[max_frames];
             size_t num_frames;
     };
-}
 
-
-namespace tracey
-{
     namespace
     {
         size_t capture_stack_trace(int frames_to_skip, int max_frames, void **out_frames, unsigned int *out_hash = 0)
@@ -716,7 +615,7 @@ $windows(
 
                 return capturedFrames;
 )
-$apple(
+$gnuc(
                 // Ensure the output is cleared
                 memset(out_frames, 0, (sizeof(void *)) * max_frames);
 
@@ -790,7 +689,7 @@ $windows(
             SymCleanup(GetCurrentProcess());
             return mutex->unlock(), backtrace_text;
 )
-$apple(
+$gnuc(
             char **strings;
             strings = backtrace_symbols(frames, num_frames);
             if (!strings)
@@ -914,28 +813,6 @@ $undefined(
 }
 
 // } #include "tracey.inl"
-
-#ifdef _WIN32
-#   include <windows.h> // AllocConsole()
-#endif
-
-//    flag  | directives            | working?
-// ---------+-----------------------+-------------
-//    /MT   | _MT                   | no (crt)
-//    /MTd  | _MT && _DEBUG         | no (crt)
-//    /MD   | _MT && _DLL           | yes
-//    /MDd  | _MT && _DLL && _DEBUG | yes
-//          |                       |
-#if defined( _WIN32 ) && defined( _MSC_VER )
-#   if defined( _MT ) && !defined( _DLL )
-#       if !defined( _DEBUG )
-#           error Incompatible C Run-Time libraries compiler flag detected ( /MT ) : Use /MD instead
-#       else
-#           error Incompatible C Run-Time libraries compiler flag detected ( /MTd ) : Use /MDd instead
-#       endif
-#   endif
-#endif
-
 
 #ifndef kTraceyAllocMultiplier
 /*  Used to increase memory requirements, and to simulate and to debug worse memory conditions */
@@ -1285,7 +1162,7 @@ namespace tracey
         }
         const char *version()
         {
-            return "0.0-a";
+            return "0.1-a";
         }
     }
 }
@@ -1367,3 +1244,18 @@ void operator delete[]( void *ptr ) throw()
 #undef kTraceyReportOnExit
 #undef kTraceyEnabledOnStart
 
+#undef $debug
+#undef $release
+#undef $other
+#undef $melse
+#undef $msvc
+#undef $gelse
+#undef $gnuc
+
+#undef $undefined
+#undef $lelse
+#undef $linux
+#undef $aelse
+#undef $apple
+#undef $welse
+#undef $windows
