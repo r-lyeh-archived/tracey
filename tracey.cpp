@@ -539,25 +539,25 @@ $lelse(
     };
 
     std::string demangle( const std::string &name ) {
-        $windows(
+        $windows({
         char demangled[1024];
         return (UnDecorateSymbolName(name.c_str(), demangled, sizeof( demangled ), UNDNAME_COMPLETE)) ? demangled : name;
-        )
-        $gnuc(
+        })
+        $gnuc({
         char demangled[1024];
         size_t sz = sizeof(demangled);
         int status;
         abi::__cxa_demangle(name.c_str(), demangled, &sz, &status);
         return !status ? demangled : name;
-        )
-        $linux(
+        })
+        $linux({
         FILE *fp = popen( (std::string("echo -n \"") + name + std::string("\" | c++filt" )).c_str(), "r" );
         if (!fp) { return name; }
         char demangled[1024];
         char *line_p = fgets(demangled, sizeof(demangled), fp);
         pclose(fp);
         return line_p;
-        )
+        })
         $undefined(
         return name;
         )
