@@ -1,7 +1,7 @@
 tracey
 ======
 
-- Lightweight and simple memory C++ leak finder. Requires C++11 (std::mutex / std::thread)
+- Lightweight and simple memory C++11 leak finder (requires std::mutex, std::thread)
 - Easy to integrate. No source modification is required.
 - Clean. Macroless and callstack based. No new/delete macro hacks.
 - Lazy. Should work out of the box. Plenty configuration options are provided anyways.
@@ -36,7 +36,7 @@ Configuration directives (optional)
   - When enabled, Tracey shows a report automatically on application exit.
 - `kTraceyDefineMemoryOperators` defaults to `1` if not overriden (should be 0 or 1).
   - When enabled, Tracey implements all new([])/delete([]) operators.
-  - When disabled, used must provide de/allocation operators thru runtime API (see below).
+  - When disabled, user must provide de/allocation operators thru runtime API (see below).
 
 Runtime API (optional)
 ----------------------
