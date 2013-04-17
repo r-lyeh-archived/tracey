@@ -906,8 +906,10 @@ namespace tracey
             //* Implementation details:
             //* - mutex is used to discard any coming recursive allocation call
             //* - mutex is constructed thru std::malloc+placement-new to avoid infinite recursion
+            //* - is_busy is used to avoid recursive trace. Every `new` called inside trace will be ignore.
 
             static volatile bool initialized = false;
+            static volatile bool is_busy = false;
             static tracey::mutex *mutex = 0;
 
             if( !ptr )
@@ -927,10 +929,15 @@ namespace tracey
             if( !enabled )
                 return ptr;
 
-            if( mutex->is_locked_by_me() )
-                return ptr;
-
             mutex->lock();
+            // If `trace` was called inside trace it will be ignore because of is_busy
+            if( is_busy ) {
+				// If the mutex is acquired and is_busy is true it means this_thread is holding
+				// the mutex, so it should not be release.
+                return ptr;
+            }
+
+            is_busy = true;
 
             {
                 static
@@ -1121,6 +1128,7 @@ namespace tracey
                     map[ ptr ] = std::make_pair< leak *, tracey::callstack * >( new leak( size ), new tracey::callstack() );
                 }
 
+                is_busy=false;
                 mutex->unlock();
             }
 
