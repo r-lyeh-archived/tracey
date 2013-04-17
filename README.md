@@ -73,7 +73,7 @@ int main( int argc, const char **argv )
 Possible output
 ---------------
 <pre>
-D:\prj\tracey&gt;cl sample.cc tracey.cpp /MD /Zi -DkTraceyReportOnExit=1
+D:\prj\tracey&gt;cl sample.cc tracey.cpp /MDd /Zi && rem g++ sample.cc tracey.cpp -g -rdynamic -std=c++0x
 D:\prj\tracey&gt;sample
 &lt;tracey/tracey.cpp&gt; says: Beginning of report. Error, 2 leaks found; 1604 bytes wasted ('lame' score)
 1) Leak 4 bytes [0033F1E8] backtrace 1/2 (50%)
