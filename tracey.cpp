@@ -479,20 +479,21 @@ namespace tracey
     {
         public:
 
-        mutex() : locked_by( nobody() )
+        mutex() : locked( false )
         {}
 
         void lock() {
-            if( locked_by != me() ) {
+            if( !is_locked_by_me() ) {
                 self.lock();
+                locked = true;
                 locked_by = me();
             }
         }
 
         void unlock() {
             if( locked_by == me() ) {
-                locked_by = nobody();
                 self.unlock();
+                locked = false;
             }
         }
 
@@ -501,16 +502,17 @@ namespace tracey
                 if( !self.try_lock() )
                     return false;
                 locked_by = me();
+                locked = true;
             }
             return true;
         }
 
         bool is_locked() const {
-            return locked_by != nobody();
+            return locked;
         }
 
         bool is_locked_by_me() const {
-            return locked_by == me();
+            return is_locked() && locked_by == me();
         }
 
         private:
@@ -523,6 +525,7 @@ $linux(
 $lelse(
         std::mutex self;
 )
+        bool locked;
 
         std::thread::id nobody() const { // return empty/invalid thread
             return std::thread::id();
@@ -931,6 +934,8 @@ namespace tracey
                 return ptr;
 
             mutex->lock();
+            assert( mutex->is_locked() );
+
 
             {
                 static
