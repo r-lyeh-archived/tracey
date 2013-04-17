@@ -1,7 +1,7 @@
 tracey
 ======
 
-- Lightweight and simple memory C++11 leak finder (requires std::mutex, std::thread)
+- Lightweight and simple memory C++11 leak finder with no dependencies
 - Easy to integrate. No source modification is required.
 - Clean. Macroless and callstack based. No new/delete macro hacks.
 - Lazy. Should work out of the box. Plenty configuration options are provided anyways.
