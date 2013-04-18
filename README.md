@@ -114,19 +114,23 @@ tracey.cpp:105:6: warning: #warning "&lt;tracey/tracey.cpp&gt; says: do not forg
 </pre>
 
 <pre>
-[live@bridge-live tracey]$ clang++ sample.cc tracey.cpp -g -rdynamic -std=c++0x
-[live@bridge-live tracey]$ ./a.out
-&lt;tracey/tracey.cpp&gt; says: Beginning of report. Error, 2 leaks found; 1604 bytes wasted ('lame' score)
-1) Leak 4 bytes [0xb1d010] backtrace 1/2 (50%)
-    /home/live/tracey/sample.cc:11
-    /usr/lib/libc.so.6(__libc_start_main+0xf5) [0x7fcc20a80a15]
-    ./a.out() [0x4070f9]
-2) Leak 1600 bytes [0xb1d1e0] backtrace 2/2 (100%)
-    /home/live/tracey/sample.cc:6
-    /home/live/tracey/sample.cc:12
-    /usr/lib/libc.so.6(__libc_start_main+0xf5) [0x7fcc20a80a15]
-    ./a.out() [0x4070f9]
-&lt;tracey/tracey.cpp&gt; says: End of report. Error, 2 leaks found; 1604 bytes wasted ('lame' score)
-[live@bridge-live tracey]$ 
+$ clang++ sample.cc tracey.cpp -g -o sample -std=c++11 -stdlib=libc++
+tracey.cpp:105:6: warning: "&lt;tracey/tracey.cpp&gt; says: do not forget -g -rdynamic compiler settings!" [-W#warnings]
+#    warning "&lt;tracey/tracey.cpp&gt; says: do not forget -g -rdynamic compiler settings!"
+     ^
+1 warning generated.
+$ ./sample
+<tracey/tracey.cpp> says: Beginning of report. Error, 2 leaks found; 1604 bytes wasted ('lame' score)
+1) Leak 4 bytes [0x10d800810] backtrace 1/2 (50%)
+    4   sample                              0x000000010d70616e operator new(unsigned long) + 190
+    5   sample                              0x000000010d703ad8 main + 40
+    6   sample                              0x000000010d703a84 start + 52
+    7   ???                                 0x0000000000000001 0x0 + 1
+2) Leak 1600 bytes [0x7fa15b000000] backtrace 2/2 (100%)
+    4   sample                              0x000000010d70623e operator new[](unsigned long) + 190
+    5   sample                              0x000000010d703aa3 make_leaks() + 19
+    6   sample                              0x000000010d703aea main + 58
+    7   sample                              0x000000010d703a84 start + 52
+    8   ???                                 0x0000000000000001 0x0 + 1
+<tracey/tracey.cpp> says: End of report. Error, 2 leaks found; 1604 bytes wasted ('lame' score)
 </pre>
-
