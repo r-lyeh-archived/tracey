@@ -71,10 +71,10 @@ int main( int argc, const char **argv )
 }
 </pre>
 
-Possible output
----------------
+Possible outputs (msvc/g++/clang)
+---------------------------------
 <pre>
-D:\prj\tracey&gt;cl sample.cc tracey.cpp /MDd /Zi && rem g++ sample.cc tracey.cpp -g -rdynamic -std=c++0x
+D:\prj\tracey&gt;cl sample.cc tracey.cpp /MDd /Zi
 D:\prj\tracey&gt;sample
 &lt;tracey/tracey.cpp&gt; says: Beginning of report. Error, 2 leaks found; 1604 bytes wasted ('lame' score)
 1) Leak 4 bytes [0033F1E8] backtrace 1/2 (50%)
@@ -95,3 +95,38 @@ D:\prj\tracey&gt;sample
 &lt;tracey/tracey.cpp&gt; says: End of report. Error, 2 leaks found; 1604 bytes wasted ('lame' score)
 D:\prj\tracey&gt;
 </pre>
+
+<pre>
+[live@bridge-live tracey]$ g++ sample.cc tracey.cpp -g -rdynamic -std=c++0x
+tracey.cpp:105:6: warning: #warning "<tracey/tracey.cpp> says: do not forget -g -rdynamic compiler settings!" [-Wcpp]
+[live@bridge-live tracey]$ ./a.out
+&lt;tracey/tracey.cpp&gt; says: Beginning of report. Error, 2 leaks found; 1604 bytes wasted ('lame' score)
+1) Leak 4 bytes [0x1fa1010] backtrace 1/2 (50%)
+    /home/live/tracey/sample.cc:11
+    /usr/lib/libc.so.6(__libc_start_main+0xf5) [0x7ff22aed3a15]
+    ./a.out() [0x407549]
+2) Leak 1600 bytes [0x1fa11e0] backtrace 2/2 (100%)
+    /home/live/tracey/sample.cc:7
+    /home/live/tracey/sample.cc:14
+    /usr/lib/libc.so.6(__libc_start_main+0xf5) [0x7ff22aed3a15]
+    ./a.out() [0x407549]
+&lt;tracey/tracey.cpp&gt; says: End of report. Error, 2 leaks found; 1604 bytes wasted ('lame' score)
+</pre>
+
+<pre>
+[live@bridge-live tracey]$ clang++ sample.cc tracey.cpp -g -rdynamic -std=c++0x
+[live@bridge-live tracey]$ ./a.out
+&lt;tracey/tracey.cpp&gt; says: Beginning of report. Error, 2 leaks found; 1604 bytes wasted ('lame' score)
+1) Leak 4 bytes [0xb1d010] backtrace 1/2 (50%)
+    /home/live/tracey/sample.cc:11
+    /usr/lib/libc.so.6(__libc_start_main+0xf5) [0x7fcc20a80a15]
+    ./a.out() [0x4070f9]
+2) Leak 1600 bytes [0xb1d1e0] backtrace 2/2 (100%)
+    /home/live/tracey/sample.cc:6
+    /home/live/tracey/sample.cc:12
+    /usr/lib/libc.so.6(__libc_start_main+0xf5) [0x7fcc20a80a15]
+    ./a.out() [0x4070f9]
+&lt;tracey/tracey.cpp&gt; says: End of report. Error, 2 leaks found; 1604 bytes wasted ('lame' score)
+[live@bridge-live tracey]$ 
+</pre>
+
