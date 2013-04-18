@@ -6,7 +6,8 @@ tracey
 - Clean. Macroless and callstack based. No new/delete macro hacks.
 - Lazy. Should work out of the box. Plenty configuration options are provided anyways.
 - Tiny. One header and one source file.
-- Cross-platform. OS dependencies only. No third party dependencies.
+- Cross-platform. Builds on Windows/Linux/MacosX. Compiles on g++/clang/msvc.
+- OS dependencies only. No third party dependencies.
 - MIT licensed.
 
 Implementation directives (optional)
