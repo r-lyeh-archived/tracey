@@ -98,7 +98,7 @@ D:\prj\tracey&gt;
 
 <pre>
 [live@bridge-live tracey]$ g++ sample.cc tracey.cpp -g -rdynamic -std=c++0x
-tracey.cpp:105:6: warning: #warning "<tracey/tracey.cpp> says: do not forget -g -rdynamic compiler settings!" [-Wcpp]
+tracey.cpp:105:6: warning: #warning "&lt;tracey/tracey.cpp&gt; says: do not forget -g -rdynamic compiler settings!" [-Wcpp]
 [live@bridge-live tracey]$ ./a.out
 &lt;tracey/tracey.cpp&gt; says: Beginning of report. Error, 2 leaks found; 1604 bytes wasted ('lame' score)
 1) Leak 4 bytes [0x1fa1010] backtrace 1/2 (50%)
