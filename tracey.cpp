@@ -59,18 +59,18 @@
 #include <vector>
 
 #if __cplusplus > 199711L || (defined(_MSC_VER) && _MSC_VER >= 1700)
-// when c++11 is supported
+// if C++11 is supported...
 #include <mutex>
-#include <thread> 
+#include <thread>
 #else
-// tinythread.h not found? please unpack tinythread++ to the same folder where tracey.cpp is located
-#include "tinythread.h" 
+// else legacy C++
+#include "tinythread.h" // header not found? copy tinythread++ sources to tracey's folder!
 namespace std {
     using namespace tthread;
 }
 #endif
 
-// headers
+// Headers
 
 #if defined(_WIN32) || defined(_WIN64)
 #   include <Windows.h>
@@ -95,7 +95,7 @@ namespace std {
 #   include <cxxabi.h>
 #endif
 
-// messages
+// Messages
 
 #ifdef _MSC_VER
 #    pragma message( "<tracey/tracey.cpp> says: do not forget /Zi, /Z7 or /C7 compiler settings! /Oy- also helps" )
@@ -123,75 +123,60 @@ namespace std {
 
 // OS utils
 
+#define $no(...)
+#define $yes(...)     __VA_ARGS__
+
 #if defined(_WIN32) || defined(_WIN64)
-#   define $windows(...)   __VA_ARGS__
-#   define $welse(...)
-#   define $defined
+#   define $windows   $yes
+#   define $welse     $no
 #else
-#   define $windows(...)
-#   define $welse(...)     __VA_ARGS__
+#   define $windows   $no
+#   define $welse     $yes
 #endif
 
 #ifdef __APPLE__
-#   define $apple(...)     __VA_ARGS__
-#   define $aelse(...)
-#   define $defined
+#   define $apple     $yes
+#   define $aelse     $no
 #else
-#   define $apple(...)
-#   define $aelse(...)     __VA_ARGS__
+#   define $apple     $no
+#   define $aelse     $yes
 #endif
 
 #ifdef __linux__
-#   define $linux(...)     __VA_ARGS__
-#   define $lelse(...)
-#   define $defined
+#   define $linux     $yes
+#   define $lelse     $no
 #else
-#   define $linux(...)
-#   define $lelse(...)     __VA_ARGS__
-#endif
-
-#ifndef $defined
-#   define $undefined(...) __VA_ARGS__
-#else
-#   define $undefined(...)
-#   undef  $defined
+#   define $linux     $no
+#   define $lelse     $yes
 #endif
 
 // Compiler utils
 
 #if defined(NDEBUG) || defined(_NDEBUG)
-#   define $release(...)   __VA_ARGS__
-#   define $debug(...)
+#   define $release   $yes
+#   define $debug     $no
 #else
-#   define $debug(...)     __VA_ARGS__
-#   define $release(...)
+#   define $release   $no
+#   define $debug     $yes
 #endif
 
 #ifdef __GNUC__
-#   define $gnuc(...)      __VA_ARGS__
-#   define $gelse(...)
-#   define $defined
+#   define $gnuc      $yes
+#   define $gelse     $no
 #else
-#   define $gnuc(...)
-#   define $gelse(...)     __VA_ARGS__
+#   define $gnuc      $no
+#   define $gelse     $yes
 #endif
 
 #ifdef _MSC_VER
-#   define $msvc(...)      __VA_ARGS__
-#   define $melse(...)
-#   define $defined
+#   define $msvc      $yes
+#   define $melse     $no
 #else
-#   define $msvc(...)
-#   define $melse(...)     __VA_ARGS__
+#   define $msvc      $no
+#   define $melse     $yes
 #endif
 
-#ifndef $defined
-#   define $other(...)     __VA_ARGS__
-#else
-#   define $other(...)
-#   undef  $defined
-#endif
-
+// Implementation
 
 namespace tracey
 {
@@ -288,11 +273,6 @@ namespace tracey
             return *this;
         }
 
-        string &operator +=( std::ostream& ( *pf )(std::ostream&))
-        {
-            return *pf == static_cast<std::ostream& ( * )(std::ostream&)>( std::endl ) ? (*this) += "\n", *this : *this;
-        }
-
         // assignment sugars
 
         template< typename T >
@@ -307,7 +287,7 @@ namespace tracey
 
         string &operator=( const char *t )
         {
-            this->assign( t ? t : std::string() );
+            this->assign( t ? t : "" );
             return *this;
         }
 
@@ -437,8 +417,8 @@ namespace tracey
     };
 
     std::string demangle( const std::string &name ) {
-        $linux({
-#if 1   // c++filt way
+    $linux({
+#if 0   // c++filt way
         FILE *fp = popen( (std::string("echo -n \"") + name + std::string("\" | c++filt" )).c_str(), "r" );
         if (!fp) { return name; }
         char demangled[1024];
@@ -459,43 +439,41 @@ namespace tracey
         dmg.pop_back(); //remove \n
         return dmg[0] == '?' ? name : dmg;
 #endif
-        })
-        $apple({
-            // format: number  filename  address  funcname + offset
-            // find beginning and end of function name
-            const char *b = name.data();
-            for (; *b == ' '; ++b);      // skip to first non-space char
-            for (int i=0; i<3; ++i) {
-                for (; *b != ' '; ++b);  // skip to end of this word
-                for (; *b == ' '; ++b);  // skip to beginning of next word
-            }
-            char* e = strrchr((char*) b, '+'); // look for last '+'
-            if (!e || e<=b || *--e != ' ') return name; // abort if bad format
-            static size_t alloc_size = 1024;
-            static std::unique_ptr<char, void (*)(void*)> demangled((char*) std::malloc(alloc_size), &std::free);
-            size_t sz = alloc_size;
-            int status;
-            *e = '\0';  // terminate string for __cxa_demangle
-            abi::__cxa_demangle(b, demangled.get(), &sz, &status);
-            *e = ' ';   // restore original
-            if (sz>alloc_size) alloc_size = sz; // update alloc_size if __cxa_demangle called realloc
-            return status ? name :
-            std::string(name.data(), b - name.data()) + std::string(demangled.get()) + std::string(e);
-        })
-        $windows({
+    })
+    $apple({
+        // format: number  filename  address  funcname + offset
+        // find beginning and end of function name
+        const char *b = name.data();
+        for (; *b == ' '; ++b);      // skip to first non-space char
+        for (int i=0; i<3; ++i) {
+            for (; *b != ' '; ++b);  // skip to end of this word
+            for (; *b == ' '; ++b);  // skip to beginning of next word
+        }
+        char* e = strrchr((char*) b, '+'); // look for last '+'
+        if (!e || e<=b || *--e != ' ') return name; // abort if bad format
+        static size_t alloc_size = 1024;
+        static std::unique_ptr<char, void (*)(void*)> demangled((char*) std::malloc(alloc_size), &std::free);
+        size_t sz = alloc_size;
+        int status;
+        *e = '\0';  // terminate string for __cxa_demangle
+        abi::__cxa_demangle(b, demangled.get(), &sz, &status);
+        *e = ' ';   // restore original
+        if (sz>alloc_size) alloc_size = sz; // update alloc_size if __cxa_demangle called realloc
+        return status ? name :
+        std::string(name.data(), b - name.data()) + std::string(demangled.get()) + std::string(e);
+    })
+    $windows({
         char demangled[1024];
         return (UnDecorateSymbolName(name.c_str(), demangled, sizeof( demangled ), UNDNAME_COMPLETE)) ? demangled : name;
-        })
-        $gnuc({
+    })
+    $gnuc({
         char demangled[1024];
         size_t sz = sizeof(demangled);
         int status;
         abi::__cxa_demangle(name.c_str(), demangled, &sz, &status);
         return !status ? demangled : name;
-        })
-        $undefined(
+    })
         return name;
-        )
     }
 
     class callstack
@@ -506,7 +484,7 @@ namespace tracey
         callstack();
 
         // print
-        std::string str( const char *format12 = "#\1 \2\n", size_t skip_initial = 0 );
+        std::string str( const char *format12 = "#\1 \2\n", size_t skip_begin = 0, size_t skip_end = 0 );
 
         private:
 
@@ -519,7 +497,7 @@ namespace tracey
     {
         size_t capture_stack_trace(int frames_to_skip, int max_frames, void **out_frames)
         {
-        $windows(
+        $windows({
             if (max_frames > 32)
                     max_frames = 32;
 
@@ -536,7 +514,7 @@ namespace tracey
                     if( module )
                         ptrRtlCaptureStackBackTrace = (FuncRtlCaptureStackBackTrace *)GetProcAddress(module, "RtlCaptureStackBackTrace");
                     else
-                        assert( !"cant load kernel32.dll" );
+                        assert( !"<tracey/tracey.cpp> says: error! cant load kernel32.dll" );
                 }
                 ~raii() { if(module) FreeLibrary(module); }
 
@@ -548,21 +526,19 @@ namespace tracey
                 capturedFrames = module.ptrRtlCaptureStackBackTrace(frames_to_skip+1, max_frames, out_frames, (DWORD *) 0);
 
             return capturedFrames;
-        )
-        $gnuc(
+        })
+        $gnuc({
             // Ensure the output is cleared
             memset(out_frames, 0, (sizeof(void *)) * max_frames);
 
             return (backtrace(out_frames, max_frames));
-        )
-        $undefined(
+        })
             return 0;
-        )
         }
 
-        tracey::strings resolve_stack_trace(void **frames, int num_frames)
+        tracey::strings resolve_stack_trace(void **frames, unsigned num_frames)
         {
-        $windows(
+        $windows({
             // this mutex is used to prevent race conditions.
             // however, it is constructed with heap based plus placement-new just to meet next features:
             // a) ready to use before program begins.
@@ -573,73 +549,73 @@ namespace tracey
             // we will avoid recursive deadlocks that would happen in a new()->memtracer->callstack->new()[...] scenario.
             // d) leaks free: zero global allocations are made.
             // we don't polute memmanager/memtracer reports with false positives.
+
+            // no leak and no memory traced :P
+            // memtraced recursion safe; we don't track placement-news
             static std::mutex *mutex = 0;
             if( !mutex )
             {
                 static char placement[ sizeof(std::mutex) ];
-                mutex = (std::mutex *)placement; // no leak and no memory traced :P
-                new (mutex) std::mutex();        // memtraced recursion safe; we don't track placement-news
+                mutex = (std::mutex *)placement;
+                new (mutex) std::mutex();
             }
 
+            tracey::strings backtrace_text;
             mutex->lock();
 
-            BOOL result = SymInitialize(GetCurrentProcess(), NULL, TRUE);
-            if (!result)
-                return mutex->unlock(), tracey::strings();
+            HANDLE process = GetCurrentProcess();
+            if( SymInitialize( process, NULL, TRUE) ) {
 
-            tracey::strings backtrace_text;
-            for( int i = 0; i < num_frames; i++ )
-            {
-                char buffer[sizeof(IMAGEHLP_SYMBOL64) + 128];
-                IMAGEHLP_SYMBOL64 *symbol64 = reinterpret_cast<IMAGEHLP_SYMBOL64*>(buffer);
-                memset(symbol64, 0, sizeof(IMAGEHLP_SYMBOL64) + 128);
-                symbol64->SizeOfStruct = sizeof(IMAGEHLP_SYMBOL64);
-                symbol64->MaxNameLength = 128;
+                enum { MAXSYMBOLNAME = 128 - sizeof(IMAGEHLP_SYMBOL64) };
+                char symbol64_buf     [sizeof(IMAGEHLP_SYMBOL64) + MAXSYMBOLNAME];
+                char symbol64_bufblank[sizeof(IMAGEHLP_SYMBOL64) + MAXSYMBOLNAME] = {0};
+                IMAGEHLP_SYMBOL64 *symbol64       = reinterpret_cast<IMAGEHLP_SYMBOL64*>(symbol64_buf);
+                IMAGEHLP_SYMBOL64 *symbol64_blank = reinterpret_cast<IMAGEHLP_SYMBOL64*>(symbol64_bufblank);
+                symbol64_blank->SizeOfStruct = sizeof(IMAGEHLP_SYMBOL64);
+                symbol64_blank->MaxNameLength = MAXSYMBOLNAME - 1;
 
-                DWORD64 displacement = 0;
-                BOOL result = SymGetSymFromAddr64(GetCurrentProcess(), (DWORD64) frames[i], &displacement, symbol64);
-                if (result)
+                IMAGEHLP_LINE64 line64, line64_blank = {0};
+                line64_blank.SizeOfStruct = sizeof(IMAGEHLP_LINE64);
+
+                for( unsigned i = 0; i < num_frames; i++ )
                 {
-                    IMAGEHLP_LINE64 line64;
-                    DWORD displacement = 0;
-                    memset(&line64, 0, sizeof(IMAGEHLP_LINE64));
-                    line64.SizeOfStruct = sizeof(IMAGEHLP_LINE64);
-                    result = SymGetLineFromAddr64(GetCurrentProcess(), (DWORD64) frames[i], &displacement, &line64);
-                    if (result)
-                    {
-                        std::string line = tracey::string(symbol64->Name) + " (" + line64.FileName + ", line " + tracey::string(line64.LineNumber) + ")";
-                        backtrace_text.push_back( line );
-                    }
-                    else
-                    {
-                        backtrace_text.push_back(symbol64->Name);
+                    *symbol64 = *symbol64_blank;
+                    DWORD64 displacement64 = 0;
+                    if( !SymGetSymFromAddr64(process, (DWORD64) frames[i], &displacement64, symbol64) ) {
+                        backtrace_text.push_back("????");
+                    } else {
+                        line64 = line64_blank;
+                        DWORD displacement = 0;
+                        if( !SymGetLineFromAddr64(process, (DWORD64) frames[i], &displacement, &line64) ) {
+                            backtrace_text.push_back(symbol64->Name);
+                        } else {
+                            backtrace_text.push_back(tracey::string("\1 (\2, line \3)", symbol64->Name, line64.FileName, line64.LineNumber));
+                        }
                     }
                 }
-                else backtrace_text.push_back("????");
+
+                SymCleanup(process);
             }
 
-            SymCleanup(GetCurrentProcess());
-            return mutex->unlock(), backtrace_text;
-        )
-        $gnuc(
-            char **strings = backtrace_symbols(frames, num_frames);
-            if( !strings )
-                return tracey::strings();
+            mutex->unlock();
+            return backtrace_text;
+        })
+        $gnuc({
 
             tracey::strings backtrace_text;
+            char **strings = backtrace_symbols(frames, num_frames);
 
-            for( int cnt = 0; cnt < num_frames; cnt++ )
-            {
-                // Decode the strings
-                backtrace_text.push_back( demangle(strings[cnt]) );
+            // Decode the strings
+            if( strings ) {
+                for( unsigned i = 0; i < num_frames; i++ ) {
+                    backtrace_text.push_back( demangle(strings[i]) );
+                }
+                free( strings );
             }
 
-            free (strings);
             return backtrace_text;
-        )
-        $undefined(
+        })
             return tracey::strings();
-        )
         }
     }
 
@@ -649,13 +625,13 @@ namespace tracey
         for( int i = num_frames; i < max_frames; ++i ) frames[ i ] = 0;
     }
 
-    std::string callstack::str( const char *format12, size_t skip_initial )
+    std::string callstack::str( const char *format12, size_t skip_begin, size_t skip_end )
     {
         tracey::string out;
 
         tracey::strings stack_trace = tracey::resolve_stack_trace( frames, num_frames );
 
-        for( size_t i = skip_initial; i < stack_trace.size(); i++ )
+        for( size_t i = skip_begin, end = stack_trace.size() - skip_end; i < end; i++ )
             out += tracey::string( format12, (int)i, stack_trace[i] );
 
         return out;
@@ -871,24 +847,26 @@ namespace tracey
                         kTraceyPrint( header );
 
                         // inspect leaks (may take a while)
+                        // @todo: shrink report by skipping ending lines in stacktrace which executed before main() or WinMain()
+                        //        callstack->str( ..., skip_end = any.stacktrace.find_first(WinMain()) || .find_first( main() ) )
 
                         size_t ibegin = 0, iend = sort_by_id.size(), percent = ~0, current = 0;
                         for( map::const_iterator it = sort_by_id.begin(), end = sort_by_id.end(); it != end; ++it )
                         {
-                            const void *the_address = it->second.addr;
-                            leak *the_leak = it->second.lk;
-                            tracey::callstack *the_callstack = it->second.cs;
+                            const void *my_address = it->second.addr;
+                            leak *my_leak = it->second.lk;
+                            tracey::callstack *my_callstack = it->second.cs;
 
                             current = (size_t)( ++ibegin * 100.0 / iend );
 
                             /* @todo: move this to an user-defined callback { */
 
-                            tracey::string  line( "\1) Leak \2 bytes [\3] backtrace \4/\5 (\6%)\r\n", ibegin, the_leak->size, the_address, ibegin, iend, percent = current );
+                            tracey::string  line( "\1) Leak \2 bytes [\3] backtrace \4/\5 (\6%)\r\n", ibegin, my_leak->size, my_address, ibegin, iend, percent = current );
                             $windows(
-                            tracey::strings lines = tracey::string( the_callstack->str("\2\n", 2) ).tokenize("\n");
+                            tracey::strings lines = tracey::string( my_callstack->str("\2\n", 2) ).tokenize("\n");
                             )
                             $welse(
-                            tracey::strings lines = tracey::string( the_callstack->str("\2\n", 4) ).tokenize("\n");
+                            tracey::strings lines = tracey::string( my_callstack->str("\2\n", 4) ).tokenize("\n");
                             )
 
                             for( size_t i = 0; i < lines.size(); ++i )
@@ -1093,7 +1071,6 @@ void operator delete[]( void *ptr ) throw()
 #undef kTraceyReportOnExit
 #undef kTraceyEnabledOnStart
 
-#undef $other
 #undef $melse
 #undef $msvc
 #undef $gelse
@@ -1101,10 +1078,12 @@ void operator delete[]( void *ptr ) throw()
 #undef $release
 #undef $debug
 
-#undef $undefined
 #undef $lelse
 #undef $linux
 #undef $aelse
 #undef $apple
 #undef $welse
 #undef $windows
+
+#undef $yes
+#undef $no
