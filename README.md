@@ -66,7 +66,7 @@ special notes
 
 Sample
 ------
-```
+```c++
 // tracey is callstack based. no dirty new/delete macro tricks.
 // tracey is a static library. requires no source modification. just link it.
 
@@ -111,7 +111,7 @@ D:\prj\tracey>
 
 ```
 [live@bridge-live tracey]$ g++ sample.cc tracey.cpp -g -lpthread -std=c++0x
-tracey.cpp:105:6: warning: #warning "<tracey/tracey.cpp> says: do not forget -g -rdynamic compiler settings!" [-Wcpp]
+tracey.cpp:105:6: warning: #warning "<tracey/tracey.cpp> says: do not forget -g -lpthread compiler settings!" [-Wcpp]
 [live@bridge-live tracey]$ ./a.out
 <tracey/tracey.cpp> says: Beginning of report. Error, 2 leaks found; 1604 bytes wasted ('lame' score)
 1) Leak 4 bytes [0x1fa1010] backtrace 1/2 (50%)
@@ -128,7 +128,7 @@ tracey.cpp:105:6: warning: #warning "<tracey/tracey.cpp> says: do not forget -g 
 
 ```
 $ clang++ sample.cc tracey.cpp -g -o sample -std=c++11 -stdlib=libc++
-tracey.cpp:105:6: warning: "<tracey/tracey.cpp> says: do not forget -g -rdynamic compiler settings!" [-W#warnings]
+tracey.cpp:105:6: warning: "<tracey/tracey.cpp> says: do not forget -g compiler settings!" [-W#warnings]
 #    warning "<tracey/tracey.cpp> says: do not forget -g -rdynamic compiler settings!"
      ^
 1 warning generated.
