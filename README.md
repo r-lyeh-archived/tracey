@@ -60,6 +60,10 @@ Runtime API (optional)
 - `tracey::report()` tells Tracey to show current report.
 - `tracey::version()` tells Tracey to return current version.
 
+special notes
+-------------
+- g++ users: both `-std=c++0x` and `-lpthread` may be required when compiling `tracey.cpp`
+
 Sample
 ------
 ```
@@ -106,7 +110,7 @@ D:\prj\tracey>
 ```
 
 ```
-[live@bridge-live tracey]$ g++ sample.cc tracey.cpp -g -rdynamic -std=c++0x
+[live@bridge-live tracey]$ g++ sample.cc tracey.cpp -g -lpthread -std=c++0x
 tracey.cpp:105:6: warning: #warning "<tracey/tracey.cpp> says: do not forget -g -rdynamic compiler settings!" [-Wcpp]
 [live@bridge-live tracey]$ ./a.out
 <tracey/tracey.cpp> says: Beginning of report. Error, 2 leaks found; 1604 bytes wasted ('lame' score)

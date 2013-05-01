@@ -43,6 +43,7 @@
 #include <cassert>
 #include <cstddef>
 #include <cstdlib>
+#include <cstdio>
 #include <cstring>
 
 #include <algorithm>
@@ -98,11 +99,13 @@ namespace std {
 // Messages
 
 #ifdef _MSC_VER
-#    pragma message( "<tracey/tracey.cpp> says: do not forget /Zi, /Z7 or /C7 compiler settings! /Oy- also helps" )
+#    pragma message( "<tracey/tracey.cpp> says: do not forget /Zi, /Z7 or /C7 compiler settings! /Oy- also helps!" )
 #endif
 
-#ifdef __GNUC__
-#    warning "<tracey/tracey.cpp> says: do not forget -g -rdynamic compiler settings!"
+#if   defined(__clang__)
+#    warning "<tracey/tracey.cpp> says: do not forget -g compiler setting!"
+#elif defined(__GNUC__)
+#    warning "<tracey/tracey.cpp> says: do not forget -g -lpthread compiler settings!"
 #endif
 
 //    flag  | directives            | working?
@@ -374,39 +377,62 @@ namespace tracey
     {
         public:
 
-        mutex() : locked( false )
-        {}
+        mutex() : locked_by( nobody() )
+        {
+            static struct once { once(mutex *self) {
+                if( self->me() == self->nobody() ) {
+                    std::fprintf(stderr, "%s", "<tracey/tracey.cpp> says: g++ user? forgot to add -lpthread?\n");
+                    std::exit(-1);
+            }}} check(this);
+        }
 
         void lock() {
-            if( !is_locked_by_me() ) {
+            if( locked_by != me() ) {
                 self.lock();
-                locked = true;
                 locked_by = me();
             }
         }
 
         void unlock() {
             if( locked_by == me() ) {
-                locked = false;
+                locked_by = nobody();
                 self.unlock();
             }
         }
 
+        bool try_lock() {
+            if( locked_by != me() ) {
+                if( !self.try_lock() )
+                    return false;
+                locked_by = me();
+            }
+            return true;
+        }
+
         bool is_locked() const {
-            return locked;
+            return locked_by != nobody();
         }
 
         bool is_locked_by_me() const {
-            return locked && locked_by == me();
+            return locked_by == me();
         }
 
         private:
 
         std::thread::id locked_by;
-        std::mutex self;
-        bool locked;
 
-        inline std::thread::id me() const { // return current thread id
+$linux(
+        std::recursive_mutex self;
+)
+$lelse(
+        std::mutex self;
+)
+
+        std::thread::id nobody() const { // return empty/invalid thread
+            return std::thread::id();
+        }
+
+        std::thread::id me() const { // return current thread id
             return std::this_thread::get_id();
         }
 
@@ -656,7 +682,7 @@ namespace tracey
 
 #ifndef kTraceyPrint
 /*  Behaviour is undefined at end of program if kTraceyPrint() implementation uses any C++ global symbol, like std::cout */
-#   define kTraceyPrint(str)       fprintf( stderr, "%s", tracey::string( str ).c_str() )
+#   define kTraceyPrint(str)       std::fprintf( stderr, "%s", tracey::string( str ).c_str() )
 #endif
 
 #ifndef kTraceyAssert
@@ -1000,7 +1026,7 @@ namespace tracey
 
 void *operator new( size_t size, const std::nothrow_t &t ) throw()
 {
-    void *ptr = tracey::trace( kTraceyAlloc( size*kTraceyAllocMultiplier ), size );
+    void *ptr = tracey::trace( kTraceyAlloc( (size_t)(size*kTraceyAllocMultiplier) ), size );
 
     kTraceyAssert(ptr);
     return ptr;
@@ -1008,7 +1034,7 @@ void *operator new( size_t size, const std::nothrow_t &t ) throw()
 
 void *operator new[]( size_t size, const std::nothrow_t &t ) throw()
 {
-    void *ptr = tracey::trace( kTraceyAlloc( size*kTraceyAllocMultiplier ), size );
+    void *ptr = tracey::trace( kTraceyAlloc( (size_t)(size*kTraceyAllocMultiplier) ), size );
 
     kTraceyAssert(ptr);
     return ptr;
@@ -1028,7 +1054,7 @@ void operator delete[]( void *ptr, const std::nothrow_t &t ) throw()
 
 void *operator new( size_t size ) //throw(std::bad_alloc)
 {
-    void *ptr = kTraceyAlloc( size*kTraceyAllocMultiplier );
+    void *ptr = kTraceyAlloc( (size_t)(size*kTraceyAllocMultiplier) );
 
     if( !ptr )
         throw kTraceyBadAlloc();
@@ -1038,7 +1064,7 @@ void *operator new( size_t size ) //throw(std::bad_alloc)
 
 void *operator new[]( size_t size ) //throw(std::bad_alloc)
 {
-    void *ptr = kTraceyAlloc( size*kTraceyAllocMultiplier );
+    void *ptr = kTraceyAlloc( (size_t)(size*kTraceyAllocMultiplier) );
 
     if( !ptr )
         throw kTraceyBadAlloc();
