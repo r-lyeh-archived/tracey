@@ -1000,7 +1000,7 @@ namespace tracey
 
 void *operator new( size_t size, const std::nothrow_t &t ) throw()
 {
-    void *ptr = tracey::trace( kTraceyAlloc( size*kTraceyAllocMultiplier ), size );
+    void *ptr = tracey::trace( kTraceyAlloc( (size_t)(size*kTraceyAllocMultiplier) ), size );
 
     kTraceyAssert(ptr);
     return ptr;
@@ -1008,7 +1008,7 @@ void *operator new( size_t size, const std::nothrow_t &t ) throw()
 
 void *operator new[]( size_t size, const std::nothrow_t &t ) throw()
 {
-    void *ptr = tracey::trace( kTraceyAlloc( size*kTraceyAllocMultiplier ), size );
+    void *ptr = tracey::trace( kTraceyAlloc( (size_t)(size*kTraceyAllocMultiplier) ), size );
 
     kTraceyAssert(ptr);
     return ptr;
@@ -1028,7 +1028,7 @@ void operator delete[]( void *ptr, const std::nothrow_t &t ) throw()
 
 void *operator new( size_t size ) //throw(std::bad_alloc)
 {
-    void *ptr = kTraceyAlloc( size*kTraceyAllocMultiplier );
+    void *ptr = kTraceyAlloc( (size_t)(size*kTraceyAllocMultiplier) );
 
     if( !ptr )
         throw kTraceyBadAlloc();
@@ -1038,7 +1038,7 @@ void *operator new( size_t size ) //throw(std::bad_alloc)
 
 void *operator new[]( size_t size ) //throw(std::bad_alloc)
 {
-    void *ptr = kTraceyAlloc( size*kTraceyAllocMultiplier );
+    void *ptr = kTraceyAlloc( (size_t)(size*kTraceyAllocMultiplier) );
 
     if( !ptr )
         throw kTraceyBadAlloc();
