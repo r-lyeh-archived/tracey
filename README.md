@@ -15,38 +15,70 @@ Features
 
 Cons
 ----
-- No hooks for `malloc()`/`free()`. Tracey supports `new`/`delete` C++ memory operators only.
-- No support for MSVC `/MT` and `/MTd` modes. Tracey supports MSVC `/MD` and `/MDd` modes only.
-- Slower runtime than regular builds. There is enough room for improvement though.
+- Hooks for `malloc()`/`free()` are only available on Windows.
+- Slower runtime than regular builds. There is room for improvement though.
 
-Implementation directives (optional)
-------------------------------------
-- `kTraceyAlloc(size)` defaults to `std::malloc(size)` if not overriden.
-  - All allocations merge to this symbol.
-- `kTraceyFree(ptr)` defaults to `std::free(ptr)` if not overriden.
-  - All deallocations merge to this symbol.
-- `kTraceyPrint(str)` defaults to `fprintf(stderr,"%s",str)` if not overriden.
-  - All warning and reports merge to this symbol.
-- `kTraceyAssert(expr)` defaults to `assert(expr)` if not overriden.
-  - All out-of-memory runtime asserts merge to this symbol.
-- `kTraceyBadAlloc()` defaults to `std::bad_alloc()` if not overriden.
-  - All out-of-memory runtime exceptions merge to this sysmbol.
+Changelog
+---------
+0.2-a
+  - Tracey behaves better now in many aspects.
+  - Support for /MT and /MTd on Windows.
+  - iOS support.
+  - A more compatible symbol demangling on MacOs/iOS.
+  - Faster report generation.
+  - New smaller hierarchical tree reports that provide also more information than before.
+  - Bugfixed symbol retrieval when other memory managers are present.
+  - Improved symbol retrieval on windows.
+  - Experimental webserver (to be improved).
+  - Experimental win32 CRT hooks (to be improved).
+  - New compiler tweaks.
+  - Many new options and settings (unwinding stack size, truncation, etc...)
+  - Bugfixed recursive deadlocks on tinythread.
+  - A bunch of other minor bugfixes and tweaks.
+  - Tracey throws exceptions only if they are enabled on your compiler now.
+  - API upgraded.
 
-Configuration directives (optional)
------------------------------------
-- `kTraceyAllocMultiplier` defaults to `1.0` if not overriden (should be >= 1.0).
-  - Tracey uses this value to increase memory requirements, and to simulate and to debug worse memory conditions.
-- `kTraceyReportWildPointers` defaults to `1` if not overriden (should be 0 or 1).
-  - When enabled, Tracey warns about deallocations on pointers that have been not allocated by Tracey (wild pointers).
-- `kTraceyReportNullPointers` defaults to `0` if not overriden (should be 0 or 1).
-  - When enabled, Tracey warns about deallocations on null pointers.
-- `kTraceyEnabledOnStart` defaults to `1` if not overriden (should be 0 or 1).
-  - When enabled, Tracey starts before application is running.
-- `kTraceyReportOnExit` defaults to `1` if not overriden (should be 0 or 1).
+Configuration (optional)
+------------------------
+Feel free to tweak these defines in `tracey.cpp`. Or define them in your compiler directives.
+
+```c++
+  - All allocations converge to this symbol.
+#   define kTraceyAlloc                 std::malloc
+  - All deallocations converge to this symbol.
+#   define kTraceyFree                  std::free
+  - All reallocations converge to this symbol.
+#   define kTraceyRealloc               std::realloc
+#   define kTraceyMemset                std::memset
+  - All warning and reports converge to this symbol.
+#   define kTraceyPrintf                std::printf
+#   define kTraceyDie                   $windows( FatalExit ) $welse( std::exit )
+  - All out-of-memory runtime asserts converge to this symbol.
+#   define kTraceyAssert                assert
+  - All out-of-memory runtime exceptions converge to this sysmbol.
+#   define kTraceyBadAlloc              std::bad_alloc
+
+  - Tracey uses this value to simulate increased memory requirements (should be >= 1.0)
+#   define kTraceyAllocsOverhead        1.0
+#   define kTraceyStacktraceMaxTraces   128
+#   define kTraceyStacktraceSkipBegin   0 // $windows(4) $welse(0)
+#   define kTraceyStacktraceSkipEnd     0 // $windows(4) $welse(0)
+#   define kTraceyCharLinefeed          "\n"
+#   define kTraceyCharTab               "\t"
+When enabled, Tracey warns about deallocations on pointers that have been not allocated by Tracey (wild pointers)
+#   define kTraceyReportWildPointers    0
+#   define kTraceyMemsetAllocations     1
   - When enabled, Tracey shows a report automatically on application exit.
-- `kTraceyDefineMemoryOperators` defaults to `1` if not overriden (should be 0 or 1).
+#   define kTraceyReportOnExit          1
+#   define kTraceyHookCRT               0
+#   define kTraceyWebserver             1
+#   define kTraceyWebserverPort         2001
+  - When enabled, Tracey starts before application is running.
+#   define kTraceyEnabled               1
   - When enabled, Tracey implements all new([])/delete([]) operators.
   - When disabled, user must provide de/allocation operators thru runtime API (see below).
+#   define kTraceyDefineCppMemOperators 0
+```
 
 Runtime API (optional)
 ----------------------
@@ -67,19 +99,11 @@ special notes
 Sample
 ------
 ```c++
-// tracey is callstack based. no dirty new/delete macro tricks.
-// tracey is a static library. requires no source modification. just link it.
+// tracey is a callstack based static library that requires no source modification.
 
-void *make_leaks()
-{
-    return new int [400];
-}
-
-int main( int argc, const char **argv )
-{
-    int *make_leak = new int();
-    make_leaks();
-
+int main() {
+    int *make_leak = new int;
+    int *make_leaks = new int [400];
     return 0;
 }
 ```
