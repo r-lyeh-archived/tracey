@@ -90,63 +90,46 @@ int main( int argc, const char **argv )
 Possible outputs (msvc/g++/clang)
 ---------------------------------
 ```
+D:\prj\tracey>rem LINUX: g++ sample.cc tracey.cpp -g -lpthread -std=c++0x
+D:\prj\tracey>rem APPLE: clang++ sample.cc tracey.cpp -g -o sample -std=c++11 -stdlib=libc++
+D:\prj\tracey>rem WINDOWS following
 D:\prj\tracey>cl sample.cc tracey.cpp /MDd /Zi
 D:\prj\tracey>sample
-<tracey/tracey.cpp> says: Beginning of report. Error, 2 leaks found; 1604 bytes wasted ('lame' score)
-1) Leak 4 bytes [0033F1E8] backtrace 1/2 (50%)
-        main (d:\prj\moons\tracey\sample.cc, line 11)
-        __tmainCRTStartup (f:\dd\vctools\crt_bld\self_x86\crt\src\crtexe.c, line 536)
-        mainCRTStartup (f:\dd\vctools\crt_bld\self_x86\crt\src\crtexe.c, line 377)
-        BaseThreadInitThunk
-        RtlInitializeExceptionChain
-        RtlInitializeExceptionChain
-2) Leak 1600 bytes [0035D8E8] backtrace 2/2 (100%)
-        make_leaks (d:\prj\moons\tracey\sample.cc, line 6)
-        main (d:\prj\moons\tracey\sample.cc, line 14)
-        __tmainCRTStartup (f:\dd\vctools\crt_bld\self_x86\crt\src\crtexe.c, line 536)
-        mainCRTStartup (f:\dd\vctools\crt_bld\self_x86\crt\src\crtexe.c, line 377)
-        BaseThreadInitThunk
-        RtlInitializeExceptionChain
-        RtlInitializeExceptionChain
-<tracey/tracey.cpp> says: End of report. Error, 2 leaks found; 1604 bytes wasted ('lame' score)
-D:\prj\tracey>
-```
-
-```
-[live@bridge-live tracey]$ g++ sample.cc tracey.cpp -g -lpthread -std=c++0x
-tracey.cpp:105:6: warning: #warning "<tracey/tracey.cpp> says: do not forget -g -lpthread compiler settings!" [-Wcpp]
-[live@bridge-live tracey]$ ./a.out
-<tracey/tracey.cpp> says: Beginning of report. Error, 2 leaks found; 1604 bytes wasted ('lame' score)
-1) Leak 4 bytes [0x1fa1010] backtrace 1/2 (50%)
-    /home/live/tracey/sample.cc:11
-    /usr/lib/libc.so.6(__libc_start_main+0xf5) [0x7ff22aed3a15]
-    ./a.out() [0x407549]
-2) Leak 1600 bytes [0x1fa11e0] backtrace 2/2 (100%)
-    /home/live/tracey/sample.cc:7
-    /home/live/tracey/sample.cc:14
-    /usr/lib/libc.so.6(__libc_start_main+0xf5) [0x7ff22aed3a15]
-    ./a.out() [0x407549]
-<tracey/tracey.cpp> says: End of report. Error, 2 leaks found; 1604 bytes wasted ('lame' score)
-```
-
-```
-$ clang++ sample.cc tracey.cpp -g -o sample -std=c++11 -stdlib=libc++
-tracey.cpp:105:6: warning: "<tracey/tracey.cpp> says: do not forget -g compiler settings!" [-W#warnings]
-#    warning "<tracey/tracey.cpp> says: do not forget -g -rdynamic compiler settings!"
-     ^
-1 warning generated.
-$ ./sample
-<tracey/tracey.cpp> says: Beginning of report. Error, 2 leaks found; 1604 bytes wasted ('lame' score)
-1) Leak 4 bytes [0x10d800810] backtrace 1/2 (50%)
-    4   sample                              0x000000010d70616e operator new(unsigned long) + 190
-    5   sample                              0x000000010d703ad8 main + 40
-    6   sample                              0x000000010d703a84 start + 52
-    7   ???                                 0x0000000000000001 0x0 + 1
-2) Leak 1600 bytes [0x7fa15b000000] backtrace 2/2 (100%)
-    4   sample                              0x000000010d70623e operator new[](unsigned long) + 190
-    5   sample                              0x000000010d703aa3 make_leaks() + 19
-    6   sample                              0x000000010d703aea main + 58
-    7   sample                              0x000000010d703a84 start + 52
-    8   ???                                 0x0000000000000001 0x0 + 1
-<tracey/tracey.cpp> says: End of report. Error, 2 leaks found; 1604 bytes wasted ('lame' score)
+<tracey/tracey.cpp> says: generated with tracey-0.20.b (https://github.com/r-lyeh/tracey)
+<tracey/tracey.cpp> says: best viewed on foldable text editor (like SublimeText2) with tabs=2sp and no word-wrap
+<tracey/tracey.cpp> says: error, 2 leaks found; 1604 bytes wasted ('lame' score)
+[2] top-bottom normal tree (useful to find leak beginnings) (1604)
+    [1] RtlInitializeExceptionChain (1604)
+        [1] RtlInitializeExceptionChain (1604)
+            [1] BaseThreadInitThunk (1604)
+                [1] mainCRTStartup (f:\dd\vctools\crt_bld\self_x86\crt\src\crtexe.c, line 403) (1604)
+                    [2] __tmainCRTStartup (f:\dd\vctools\crt_bld\self_x86\crt\src\crtexe.c, line 501) (4)
+                        [1] initterm (4)
+                            [1] `dynamic initializer for 'static_leak'' (c:\prj\tracey\sample.cc, line 3) (4)
+                                [1] operator new (c:\prj\tracey\tracey.cpp, line 1569) (4)
+                                    [1] tracey::watch (c:\prj\tracey\tracey.cpp, line 1429) (4)
+                                        [1] tracey::`anonymous namespace'::tracer (c:\prj\tracey\tracey.cpp, line 1413) (4)
+                    [2] __tmainCRTStartup (f:\dd\vctools\crt_bld\self_x86\crt\src\crtexe.c, line 586) (1600)
+                        [1] main (c:\prj\tracey\sample.cc, line 6) (1600)
+                            [1] operator new[] (c:\prj\tracey\tracey.cpp, line 1573) (1600)
+                                [1] tracey::watch (c:\prj\tracey\tracey.cpp, line 1429) (1600)
+                                    [1] tracey::`anonymous namespace'::tracer (c:\prj\tracey\tracey.cpp, line 1413) (1600)
+[2] bottom-top normal tree (useful to find leak endings) (1604)
+    [1] tracey::`anonymous namespace'::tracer (c:\prj\tracey\tracey.cpp, line 1413) (1604)
+        [1] tracey::watch (c:\prj\tracey\tracey.cpp, line 1429) (1604)
+            [2] operator new (c:\prj\tracey\tracey.cpp, line 1569) (4)
+                [1] `dynamic initializer for 'static_leak'' (c:\prj\tracey\sample.cc, line 3) (4)
+                    [1] initterm (4)
+                        [1] __tmainCRTStartup (f:\dd\vctools\crt_bld\self_x86\crt\src\crtexe.c, line 501) (4)
+                            [1] mainCRTStartup (f:\dd\vctools\crt_bld\self_x86\crt\src\crtexe.c, line 403) (4)
+                                [1] BaseThreadInitThunk (4)
+                                    [1] RtlInitializeExceptionChain (4)
+                                        [1] RtlInitializeExceptionChain (4)
+            [2] operator new[] (c:\prj\tracey\tracey.cpp, line 1573) (1600)
+                [1] main (c:\prj\tracey\sample.cc, line 6) (1600)
+                    [1] __tmainCRTStartup (f:\dd\vctools\crt_bld\self_x86\crt\src\crtexe.c, line 586) (1600)
+                        [1] mainCRTStartup (f:\dd\vctools\crt_bld\self_x86\crt\src\crtexe.c, line 403) (1600)
+                            [1] BaseThreadInitThunk (1600)
+                                [1] RtlInitializeExceptionChain (1600)
+                                    [1] RtlInitializeExceptionChain (1600)
 ```
