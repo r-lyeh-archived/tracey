@@ -15,9 +15,12 @@ Features
 
 Cons
 ----
-- No hooks for `malloc()`/`free()`. Tracey supports `new`/`delete` C++ memory operators only.
-- No support for MSVC `/MT` and `/MTd` modes. Tracey supports MSVC `/MD` and `/MDd` modes only.
+- No hooks for `malloc()`/`free()`. Tracey supports `new`/`delete` C++ memory operators only (atm).
 - Slower runtime than regular builds. There is enough room for improvement though.
+
+The rest of the file is outdated
+--------------------------------
+Will fix it asap. Enjoy :)
 
 Implementation directives (optional)
 ------------------------------------
