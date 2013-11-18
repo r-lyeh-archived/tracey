@@ -1456,12 +1456,14 @@ namespace tracey
         tracer( &rep, special_fn );
     }
     void fail( const char *message ) {
+        kTraceyPrintf( "%s\n", message );
+        kTraceyAssert( !"<tracey/tracey.cpp> says: fail() requested" );
         $throw(
             throw std::runtime_error( message );
         )
-        kTraceyPrintf( "%s", message );
-        kTraceyAssert( !"<tracey/tracey.cpp> says: fail() requested" );
-        kTraceyDie(__LINE__);
+        $telse(
+            kTraceyDie(__LINE__);
+        )
     }
     void badalloc() {
         $throw(
