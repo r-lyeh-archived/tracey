@@ -1,9 +1,8 @@
-#include <vector>
+// tracey is callstack based. no dirty new/delete macro tricks.
+// tracey is a static library. requires no source modification. just link it.
 
-int *static_leak = new int();
+static int *static_cpp_leak = new int;
 
 int main() {
-    std::vector< int * > some_other_leak( 100, new int [400] );
-    some_other_leak.clear();
-    return 0;
+    new int [400];
 }

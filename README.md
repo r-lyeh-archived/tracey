@@ -18,25 +18,6 @@ Cons
 - No hooks for `malloc()`/`free()`. Tracey supports `new`/`delete` C++ memory operators only (atm).
 - Slower runtime than regular builds. There is room for improvement though.
 
-Changelog
----------
-0.20-b
-  - Tracey behaves better now in many aspects.
-  - Support for /MT and /MTd on Windows.
-  - iOS support.
-  - A more compatible symbol demangling on MacOs/iOS.
-  - Faster report generation.
-  - New smaller hierarchical tree reports that provide also more information than before.
-  - Bugfixed symbol retrieval when other memory managers are present.
-  - Improved symbol retrieval on windows.
-  - Experimental webserver (to be improved).
-  - New compiler tweaks.
-  - Many new options and settings (unwinding stack size, truncation, etc...)
-  - Bugfixed recursive deadlocks on tinythread.
-  - A bunch of other minor bugfixes and tweaks.
-  - Tracey throws exceptions only if they are enabled on your compiler now.
-  - API upgraded.
-  - Many things I have forgotten.
 
 Configuration (optional)
 ------------------------
@@ -107,15 +88,10 @@ Sample
 // tracey is callstack based. no dirty new/delete macro tricks.
 // tracey is a static library. requires no source modification. just link it.
 
-void *make_leaks() {
-    return new int [400];
-}
+static int *static_cpp_leak = new int;
 
-int main( int argc, const char **argv ) {
-    int *make_leak = new int();
-    make_leaks();
-
-    return 0;
+int main() {
+    new int [400];
 }
 ```
 
@@ -127,41 +103,65 @@ D:\prj\tracey>rem APPLE: clang++ sample.cc tracey.cpp -g -o sample -std=c++11 -s
 D:\prj\tracey>rem WINDOWS following
 D:\prj\tracey>cl sample.cc tracey.cpp /MDd /Zi
 D:\prj\tracey>sample
-<tracey/tracey.cpp> says: generated with tracey-0.20.b (https://github.com/r-lyeh/tracey)
+<tracey/tracey.cpp> says: generated with tracey-0.21.b (https://github.com/r-lyeh/tracey)
 <tracey/tracey.cpp> says: best viewed on foldable text editor (like SublimeText2) with tabs=2sp and no word-wrap
 <tracey/tracey.cpp> says: error, 2 leaks found; 1604 bytes wasted ('lame' score)
-[2] top-bottom normal tree (useful to find leak beginnings) (1604)
-    [1] RtlInitializeExceptionChain (1604)
-        [1] RtlInitializeExceptionChain (1604)
-            [1] BaseThreadInitThunk (1604)
-                [1] mainCRTStartup (f:\dd\vctools\crt_bld\self_x86\crt\src\crtexe.c, line 403) (1604)
-                    [2] __tmainCRTStartup (f:\dd\vctools\crt_bld\self_x86\crt\src\crtexe.c, line 501) (4)
-                        [1] initterm (4)
-                            [1] `dynamic initializer for 'static_leak'' (c:\prj\tracey\sample.cc, line 3) (4)
-                                [1] operator new (c:\prj\tracey\tracey.cpp, line 1569) (4)
-                                    [1] tracey::watch (c:\prj\tracey\tracey.cpp, line 1429) (4)
-                                        [1] tracey::`anonymous namespace'::tracer (c:\prj\tracey\tracey.cpp, line 1413) (4)
-                    [2] __tmainCRTStartup (f:\dd\vctools\crt_bld\self_x86\crt\src\crtexe.c, line 586) (1600)
-                        [1] main (c:\prj\tracey\sample.cc, line 6) (1600)
-                            [1] operator new[] (c:\prj\tracey\tracey.cpp, line 1573) (1600)
-                                [1] tracey::watch (c:\prj\tracey\tracey.cpp, line 1429) (1600)
-                                    [1] tracey::`anonymous namespace'::tracer (c:\prj\tracey\tracey.cpp, line 1413) (1600)
-[2] bottom-top normal tree (useful to find leak endings) (1604)
-    [1] tracey::`anonymous namespace'::tracer (c:\prj\tracey\tracey.cpp, line 1413) (1604)
-        [1] tracey::watch (c:\prj\tracey\tracey.cpp, line 1429) (1604)
-            [2] operator new (c:\prj\tracey\tracey.cpp, line 1569) (4)
-                [1] `dynamic initializer for 'static_leak'' (c:\prj\tracey\sample.cc, line 3) (4)
-                    [1] initterm (4)
-                        [1] __tmainCRTStartup (f:\dd\vctools\crt_bld\self_x86\crt\src\crtexe.c, line 501) (4)
-                            [1] mainCRTStartup (f:\dd\vctools\crt_bld\self_x86\crt\src\crtexe.c, line 403) (4)
-                                [1] BaseThreadInitThunk (4)
-                                    [1] RtlInitializeExceptionChain (4)
-                                        [1] RtlInitializeExceptionChain (4)
-            [2] operator new[] (c:\prj\tracey\tracey.cpp, line 1573) (1600)
-                [1] main (c:\prj\tracey\sample.cc, line 6) (1600)
-                    [1] __tmainCRTStartup (f:\dd\vctools\crt_bld\self_x86\crt\src\crtexe.c, line 586) (1600)
-                        [1] mainCRTStartup (f:\dd\vctools\crt_bld\self_x86\crt\src\crtexe.c, line 403) (1600)
-                            [1] BaseThreadInitThunk (1600)
-                                [1] RtlInitializeExceptionChain (1600)
-                                    [1] RtlInitializeExceptionChain (1600)
+<tracey/tracey.cpp> says: summary: highest peak: 1 Kb total, 1 Kb greatest peak // 1 allocs in use: 1 Kb + overhead: 0 Kb = total: 1 Kb
+<tracey/tracey.cpp> says: report filename: C:\Users\rlyeh\AppData\Local\Temp\s4lcxxx-tracey.html
+[2] leak beginnings (1604 bytes .. 100%)
+  [1] RtlInitializeExceptionChain (1604 bytes .. 100%)
+    [1] RtlInitializeExceptionChain (1604 bytes .. 100%)
+      [1] BaseThreadInitThunk (1604 bytes .. 100%)
+        [1] mainCRTStartup (f:\dd\vctools\crt\crtw32\dllstuff\crtexe.c, line 466) (1604 bytes .. 100%)
+          [2] __tmainCRTStartup (f:\dd\vctools\crt\crtw32\dllstuff\crtexe.c, line 550) (4 bytes .. 0%)
+            [1] initterm (4 bytes .. 0%)
+              [1] `dynamic initializer for 'static_cpp_leak'' (d:\prj\tracey\sample.cc, line 4) (4 bytes .. 0%)
+                [1] operator new (d:\prj\tracey\tracey.cpp, line 1691) (4 bytes .. 0%)
+                  [1] tracey::watch (d:\prj\tracey\tracey.cpp, line 1525) (4 bytes .. 0%)
+                    [1] tracey::`anonymous namespace'::tracer (d:\prj\tracey\tracey.cpp, line 1508) (4 bytes .. 0%)
+          [2] __tmainCRTStartup (f:\dd\vctools\crt\crtw32\dllstuff\crtexe.c, line 626) (1600 bytes .. 99%)
+            [1] main (d:\prj\tracey\sample.cc, line 7) (1600 bytes .. 99%)
+              [1] operator new (d:\prj\tracey\tracey.cpp, line 1691) (1600 bytes .. 99%)
+                [1] tracey::watch (d:\prj\tracey\tracey.cpp, line 1525) (1600 bytes .. 99%)
+                  [1] tracey::`anonymous namespace'::tracer (d:\prj\tracey\tracey.cpp, line 1508) (1600 bytes .. 99%)
+[2] leak endings (1604 bytes .. 100%)
+  [1] tracey::`anonymous namespace'::tracer (d:\prj\tracey\tracey.cpp, line 1508) (1604 bytes .. 100%)
+    [1] tracey::watch (d:\prj\tracey\tracey.cpp, line 1525) (1604 bytes .. 100%)
+      [1] operator new (d:\prj\tracey\tracey.cpp, line 1691) (1604 bytes .. 100%)
+        [2] `dynamic initializer for 'static_cpp_leak'' (d:\prj\tracey\sample.cc, line 4) (4 bytes .. 0%)
+          [1] initterm (4 bytes .. 0%)
+            [1] __tmainCRTStartup (f:\dd\vctools\crt\crtw32\dllstuff\crtexe.c, line 550) (4 bytes .. 0%)
+              [1] mainCRTStartup (f:\dd\vctools\crt\crtw32\dllstuff\crtexe.c, line 466) (4 bytes .. 0%)
+                [1] BaseThreadInitThunk (4 bytes .. 0%)
+                  [1] RtlInitializeExceptionChain (4 bytes .. 0%)
+                    [1] RtlInitializeExceptionChain (4 bytes .. 0%)
+        [2] main (d:\prj\tracey\sample.cc, line 7) (1600 bytes .. 99%)
+          [1] __tmainCRTStartup (f:\dd\vctools\crt\crtw32\dllstuff\crtexe.c, line 626) (1600 bytes .. 99%)
+            [1] mainCRTStartup (f:\dd\vctools\crt\crtw32\dllstuff\crtexe.c, line 466) (1600 bytes .. 99%)
+              [1] BaseThreadInitThunk (1600 bytes .. 99%)
+                [1] RtlInitializeExceptionChain (1600 bytes .. 99%)
+                  [1] RtlInitializeExceptionChain (1600 bytes .. 99%)
 ```
+
+Changelog
+---------
+0.21-b
+  - Tracey requires less memory now.
+  - Memory usage shown on tree reports now.
+0.20-b
+  - Tracey behaves better in many aspects now.
+  - Support for /MT and /MTd on Windows.
+  - iOS support.
+  - A more compatible symbol demangling on MacOs/iOS.
+  - Faster report generation.
+  - New smaller hierarchical tree reports that provide also more information than before.
+  - Bugfixed symbol retrieval when other memory managers are present.
+  - Improved symbol retrieval on windows.
+  - Experimental webserver (to be improved).
+  - New compiler tweaks.
+  - Many new options and settings (unwinding stack size, truncation, etc...)
+  - Bugfixed recursive deadlocks on tinythread.
+  - A bunch of other minor bugfixes and tweaks.
+  - Tracey throws exceptions only if they are enabled on your compiler now.
+  - API upgraded.
+  - Many things I have forgotten.
