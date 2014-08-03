@@ -94,6 +94,7 @@
 
 // Include C, then C++
 
+#include <malloc.h>
 #include <cassert>
 #include <cstddef>
 #include <cstdlib>
@@ -110,21 +111,13 @@
 #include <limits>
 #include <map>
 #include <memory>
+#include <mutex>
 #include <new>
 #include <set>
 #include <sstream>
 #include <string>
+#include <thread>
 #include <vector>
-
-#if __cplusplus > 199711L || (defined(_MSC_VER) && _MSC_VER >= 1700)
-//  if C++11 is supported include std::mutex and std::thread...
-#   include <mutex>
-#   include <thread>
-#else
-//  ...else legacy C++
-#   include "tinythread.h" // header not found? copy tinythread++ sources to tracey's folder!
-    namespace std { using namespace tthread; }
-#endif
 
 // System headers
 
@@ -290,6 +283,11 @@
 #   define kTraceyRealloc               std::realloc
 #endif
 
+#ifndef kTraceyUsableSize
+/*  Should return allocated bytes for given pointer */
+#   define kTraceyUsableSize            $windows( _msize ) $apple( malloc_size ) $linux( malloc_usable_size )
+#endif
+
 #ifndef kTraceyMemset
 /*  Behaviour is undefined at end of program if kTraceyMemset() implementation relies on C++ runtime */
 #   define kTraceyMemset                std::memset
@@ -337,47 +335,50 @@
 #endif
 
 #ifndef kTraceyMaxStacktraces
-#   define kTraceyMaxStacktraces        128
+/*  Increase this number to have longer stacktraces (slower) */
+#   define kTraceyMaxStacktraces        48
 #endif
 
 #ifndef kTraceyStacktraceSkipBegin
+/*  Skip Nth heading traces for each stacktrace */
 #   define kTraceyStacktraceSkipBegin   0 // $windows(4) $welse(0)
 #endif
 
 #ifndef kTraceyStacktraceSkipEnd
+/*  Skip Nth trailing traces for each stacktrace */
 #   define kTraceyStacktraceSkipEnd     0 // $windows(4) $welse(0)
 #endif
 
 #ifndef kTraceyCharLinefeed
+/*  String that delimites a line */
 #   define kTraceyCharLinefeed          "\n"
 #endif
 
 #ifndef kTraceyCharTab
+/*  String that delimites a tabulator */
 #   define kTraceyCharTab               "\t"
 #endif
 
 #ifndef kTraceyReportWildPointers
+/*  Report deallocation of pointers that have been allocated with a different allocator */
 #   define kTraceyReportWildPointers    0
 #endif
 
 #ifndef kTraceyDefineMemoryOperators
+/*  Define and override C++ operators to be used with Tracey */
 #   define kTraceyDefineMemoryOperators 1
 #endif
 
 #ifndef kTraceyMemsetAllocations
-#   define kTraceyMemsetAllocations     1
+#   define kTraceyMemsetAllocations     0
 #endif
 
 #ifndef kTraceyReportOnExit
 #   define kTraceyReportOnExit          1
 #endif
 
-#ifndef kTraceyWebserver
-#   define kTraceyWebserver             1
-#endif
-
 #ifndef kTraceyWebserverPort
-#   define kTraceyWebserverPort         2001
+#   define kTraceyWebserverPort         8080
 #endif
 
 #ifndef kTraceyHookLegacyCRT
@@ -400,8 +401,8 @@
 
 namespace tracey
 {
-    static void webmain( void * );
-    static void keymain( void * );
+    static void webmain();
+    static void keymain();
 
     class string : public std::string
     {
@@ -1113,17 +1114,16 @@ namespace tracey
         }
 
         struct leak {
-            size_t id, size;
+            size_t id;
             const void *addr;
             tracey::callstack cs;
 
-            leak() : size(0), id(0), addr(0)
+            leak() : id(0), addr(0)
             {}
 
             void wipe() {
                 id = create_id();
                 cs = tracey::callstack();
-                size = 0;
                 addr = 0;
             }
 
@@ -1182,8 +1182,9 @@ namespace tracey
                 *wasted = 0;
                 for( const_iterator it = this->begin(), end = this->end(); it != end; ++it ) {
                     const tracey::leak &L = it->second;
-                    if( L.addr && L.size && L.id >= timestamp_id ) {
-                        *wasted += L.size;
+                    size_t size = size_of((void *)L.addr);
+                    if( L.addr && size && L.id >= timestamp_id ) {
+                        *wasted += size;
                         list.push_back( &L );
                     }
                 }
@@ -1244,17 +1245,17 @@ namespace tracey
                     tracey::tree<void *, branch> *_tree_inv = &tree((void *)((~0)-1));
                     if( callstack.frames.size() )
                     for( unsigned i = 0, start = kTraceyStacktraceSkipBegin, end = callstack.frames.size() - 1 - kTraceyStacktraceSkipEnd; start+i <= end; ++i ) {
-
-                        (*_tree)( callstack.frames[start + i] ).get().size = L.size;
+                        size_t size = size_of((void *)L.addr);
+                        (*_tree)( callstack.frames[start + i] ).get().size = size;
                         (*_tree)( callstack.frames[start + i] ).get().hits ++;
-                        (*_tree)( callstack.frames[start + i] ).get().total = 100.0 * L.size / wasted *
+                        (*_tree)( callstack.frames[start + i] ).get().total = 100.0 * size / wasted *
                         ( (*_tree)( callstack.frames[start + i] ).get().hits );
                         _tree = &(*_tree)( callstack.frames[start + i] );
                         set.insert( callstack.frames[start + i] );
 
-                        (*_tree_inv)( callstack.frames[end - i] ).get().size = L.size;
+                        (*_tree_inv)( callstack.frames[end - i] ).get().size = size;
                         (*_tree_inv)( callstack.frames[end - i] ).get().hits ++;
-                        (*_tree_inv)( callstack.frames[end - i] ).get().total = 100.0 * L.size / wasted *
+                        (*_tree_inv)( callstack.frames[end - i] ).get().total = 100.0 * size / wasted *
                         ( (*_tree_inv)( callstack.frames[end - i] ).get().hits );
                         _tree_inv = &(*_tree_inv)( callstack.frames[end - i] );
                         set.insert( callstack.frames[end - i] );
@@ -1297,7 +1298,7 @@ namespace tracey
                         translate[ (void *)((~0)-0) ] = "leak endings";
                         kTraceyPrintf( "%s", tracey::string("<tracey/tracey.cpp> says: flattering tree of symbols..." kTraceyCharLinefeed).c_str() );
                         tree.refresh();
-						//tree.collapse().print(translate, fp);
+                        //tree.collapse().print(translate, fp);
                         tree.print(translate, fp);
 #else
                         kTraceyfPrintf( fp, "%s", std::string(64, '-') << "bottom-top tree (leakers)" << std::string(64, '-') << std::en ).c_str()dl;
@@ -1321,23 +1322,11 @@ namespace tracey
         bool init() {
             static bool once = false; if(! once ) { once = true;
                 kTraceyPrintf( "%s", tracey::settings().c_str() );
-                if( kTraceyWebserver ) {
-                    volatile bool sitdown = false;
-                    // std::thread( tracey::webmain, &sitdown ).detach();
-                    // old tinythread versions do not support detach, so workaround following:
-                    new std::thread( tracey::webmain, (void *)&sitdown );
-                    while( !sitdown ) {
-                    $windows( Sleep( 1000 ) );
-                    $welse( sleep( 1 ) );
-                    }
+                if( kTraceyWebserverPort ) {
+                    std::thread( tracey::webmain ).detach();
                 }
                 if( 1 ) {
-                    volatile bool sitdown = false;
-                    new std::thread( tracey::keymain, (void *)&sitdown );
-                    while( !sitdown ) {
-                    $windows( Sleep( 1000 ) );
-                    $welse( sleep( 1 ) );
-                    }
+                    std::thread( tracey::keymain ).detach();
                 }
                 // Construct internals of tracer (static initializers)
                 size_t dummy = 0;
@@ -1441,7 +1430,7 @@ namespace tracey
                 {
                     leak &L = it->second;
                     stats.overhead -= L.cs.space();
-                    stats.usage -= L.size;
+                    stats.usage -= size_of((void *)L.addr);
                     stats.num_leaks--;
                     L.wipe();
                 }
@@ -1503,12 +1492,12 @@ namespace tracey
                 tracey::leak &leak = (map[ptr] = map[ptr]);
                 leak.wipe();
                 leak.addr = ptr;
-                leak.size = size;
                 leak.cs.save();
                 stats.num_leaks++;
                 stats.usage += size;
                 stats.overhead += leak.cs.space();
-                if( leak.size   > stats.leak_peak  ) stats.leak_peak = leak.size;
+                size_t size = size_of(ptr);
+                if( size   > stats.leak_peak  ) stats.leak_peak = size;
                 if( stats.usage > stats.usage_peak ) stats.usage_peak = stats.usage;
             }
 
@@ -1564,7 +1553,7 @@ namespace tracey
         tracey::fail( "<tracey/tracey.cpp> says: error! out of memory" );
     }
     std::string version() {
-        return "tracey-0.21.b";  /* format is major.minor.(a)lpha/(b)eta/(r)elease/(c)andidate */
+        return "tracey-0.22.b";  /* format is major.minor.(a)lpha/(b)eta/(r)elease/(c)andidate */
     }
     std::string url() {
         return "https://github.com/r-lyeh/tracey";
@@ -1586,9 +1575,10 @@ namespace tracey
         out += tracey::string( "\1using \2 as fopen" kTraceyCharLinefeed, prefix, tracey::lookup(kTraceyfOpen) );
         out += tracey::string( "\1using \2 as fclose" kTraceyCharLinefeed, prefix, tracey::lookup(kTraceyfClose) );
         out += tracey::string( "\1using \2 as fprintf" kTraceyCharLinefeed, prefix, tracey::lookup(kTraceyfPrintf) );
+        out += tracey::string( "\1using \2 as malloc_usable_size" kTraceyCharLinefeed, prefix, tracey::lookup(kTraceyUsableSize) );
         out += tracey::string( "\1with C++ exceptions=\2" kTraceyCharLinefeed, prefix, $throw("enabled") $telse("disabled") );
         out += tracey::string( "\1with kTraceyAllocsOverhead=x\2" kTraceyCharLinefeed, prefix, kTraceyAllocsOverhead );
-        out += tracey::string( "\1with kTraceyMaxStacktraces=\2 range[\3..\4]" kTraceyCharLinefeed, prefix, kTraceyMaxStacktraces, kTraceyStacktraceSkipBegin, kTraceyStacktraceSkipEnd );
+        out += tracey::string( "\1with kTraceyMaxStacktraces=\2 range [\3..\4]" kTraceyCharLinefeed, prefix, kTraceyMaxStacktraces, kTraceyStacktraceSkipBegin, kTraceyStacktraceSkipEnd );
         // kTraceyCharLinefeed
         // kTraceyCharTab
         out += tracey::string( "\1with kTraceyReportWildPointers=\2" kTraceyCharLinefeed, prefix, kTraceyReportWildPointers ? "yes" : "no" );
@@ -1597,8 +1587,7 @@ namespace tracey
         out += tracey::string( "\1with kTraceyStacktraceSkipBegin=\2" kTraceyCharLinefeed, prefix, kTraceyStacktraceSkipBegin );
         out += tracey::string( "\1with kTraceyStacktraceSkipEnd=\2" kTraceyCharLinefeed, prefix, kTraceyStacktraceSkipEnd );
         out += tracey::string( "\1with kTraceyReportOnExit=\2" kTraceyCharLinefeed, prefix, kTraceyReportOnExit ? "yes" : "no" );
-        out += tracey::string( "\1with kTraceyWebserver=\2" kTraceyCharLinefeed, prefix, kTraceyWebserver ? "yes" : "no" );
-        out += tracey::string( "\1with kTraceyWebserverPort=\2" kTraceyCharLinefeed, prefix, kTraceyWebserverPort );
+        out += tracey::string( "\1with kTraceyWebserverPort=\2 \3" kTraceyCharLinefeed, prefix, kTraceyWebserverPort, kTraceyWebserverPort ? "(enabled)" : "(disabled)" );
         out += tracey::string( "\1with kTraceyHookLegacyCRT=\2" kTraceyCharLinefeed, prefix, kTraceyHookLegacyCRT );
         out += tracey::string( "\1with kTraceyEnabled=\2" kTraceyCharLinefeed, prefix, kTraceyEnabled );
         return out;
@@ -1641,10 +1630,14 @@ namespace tracey
         return kTraceyMemsetAllocations ? kTraceyMemset( ptr, 0, size ) : ptr;
     }
     void *calloc( size_t num, size_t size ) {
-        return tracey::malloc( num * size );
+        void *ptr = tracey::realloc( 0, num * size );
+        return kTraceyMemset( ptr, 0, num * size );
     }
     void *free( void *ptr ) {
         return tracey::realloc( ptr, 0 );
+    }
+    size_t size_of( void *ptr ) {
+        return kTraceyUsableSize( ptr );
     }
 
     void *amalloc( size_t size, size_t alignment ) {
@@ -1850,9 +1843,7 @@ static int req(int socket, const std::string &input, const std::string &url ) {
     return 0;
 }
 
-static void webmain( void *arg ) {
-    volatile bool &sitdown = *(volatile bool *)arg;
-
+static void webmain() {
     INIT();
 
     int s = SOCKET(PF_INET, SOCK_STREAM, IPPROTO_IP);
@@ -1901,17 +1892,14 @@ static void webmain( void *arg ) {
 #else
 
 namespace tracey {
-static void webmain( void *arg ) {}
+static void webmain() {}
 } // tracey::
 
 #endif
 
 namespace tracey {
     #pragma comment(lib, "user32.lib")
-    static void keymain( void *arg ) {
-        volatile bool &sitdown = *(volatile bool *)arg;
-        sitdown = true;
-
+    static void keymain() {
         $windows(
             for(;;) {
                 if( GetAsyncKeyState(VK_NUMLOCK) ) {
@@ -1940,6 +1928,7 @@ static const bool lazy_init = tracey::install_c_hooks();
 #undef kTraceyAlloc
 #undef kTraceyFree
 #undef kTraceyRealloc
+#undef kTraceyUsableSize
 #undef kTraceyPrintf
 #undef kTraceyMemset
 #undef kTraceyDie
@@ -1958,7 +1947,6 @@ static const bool lazy_init = tracey::install_c_hooks();
 #undef kTraceyDefineMemoryOperators
 #undef kTraceyReportWildPointers
 #undef kTraceyReportOnExit
-#undef kTraceyWebserver
 #undef kTraceyWebserverPort
 
 #undef $warning

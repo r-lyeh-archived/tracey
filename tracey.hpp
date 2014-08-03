@@ -30,12 +30,12 @@ namespace tracey {
     // const char *leak( size_t );
 
     // Unchecked memory
+    void *amalloc( size_t size, size_t alignment );
     void *realloc( void *ptr, size_t resize );
     void *malloc( size_t size );
     void *calloc( size_t num, size_t size );
-    void *free( void *ptr );
-
-    void *amalloc( size_t size, size_t alignment );
+    void *free(void *ptr );
+    size_t size_of( void *ptr );
 
     // Info
     std::string version();

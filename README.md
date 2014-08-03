@@ -22,45 +22,27 @@ Cons
 Configuration (optional)
 ------------------------
 Feel free to tweak these defines in `tracey.cpp`. Or define them in your compiler directives.
-```c++
-  - All de/allocations converge to this symbol:
-#   define kTraceyRealloc                 std::realloc
-  - All memset operations converge to this symbol:
-#   define kTraceyMemset                std::memset
-  - All warning and reports converge to this symbol:
-#   define kTraceyPrintf                std::printf
-  - All fatal exits converge to this symbol:
-#   define kTraceyDie                   $windows( FatalExit ) $welse( std::exit )
-  - All out-of-memory runtime asserts converge to this symbol.
-#   define kTraceyAssert                assert
-  - All out-of-memory runtime exceptions converge to this sysmbol.
-#   define kTraceyBadAlloc              std::bad_alloc
 
-  - Tracey uses this value to simulate increased memory requirements (should be >= 1.0)
-#   define kTraceyAllocsOverhead        1.0
-  - Tracey retrieves up to 128 traces by default. The longer the slower, though.
-#   define kTraceyStacktraceMaxTraces   128
-  - Tracey head position on every stacktrace.
-#   define kTraceyStacktraceSkipBegin   0 // $windows(4) $welse(0)
-  - Tracey tail position on every stacktrace.
-#   define kTraceyStacktraceSkipEnd     0 // $windows(4) $welse(0)
-  - Tracey characters when logging.
-#   define kTraceyCharLinefeed          "\n"
-#   define kTraceyCharTab               "\t"
-  - When enabled, Tracey warns about deallocations on pointers that have been not allocated by Tracey (wild pointers)
-#   define kTraceyReportWildPointers    0
-#   define kTraceyMemsetAllocations     1
-  - When enabled, Tracey shows a report automatically on application exit.
-#   define kTraceyReportOnExit          1
-  - Tracey's webserver services:
-#   define kTraceyWebserver             1
-#   define kTraceyWebserverPort         2001
-  - If you want to disable Tracey quickly, tweak this
-#   define kTraceyEnabled               1
-  - When enabled, Tracey implements all new([])/delete([]) operators.
-  - When disabled, user must provide de/allocation operators thru runtime API (see below).
-#   define kTraceyDefineCppMemOperators 0
-```
+- All de/allocations converge to `kTraceyRealloc` symbol (defaults to `std::realloc`)
+- All memset operations converge to `kTraceyMemset` symbol (defaults to `std::memset`)
+- All warning and reports converge to `kTraceyPrintf` symbol (defaults to `std::printf`)
+- All fatal exits converge to `kTraceyDie` symbol (defaults to `FatalExit` on windows, `std::exit` elsewhere)
+- All out-of-memory runtime asserts converge to `kTraceyAssert` symbol (defaults to `assert`)
+- All out-of-memory runtime exceptions converge to `kTraceyBadAlloc` symbol (defaults to `std::bad_alloc`)
+
+- Tracey uses `kTraceyAllocsOverhead` to simulate increased memory requirements (should be >= 1.0) (defaults to `1.0`)
+- Tracey uses `kTraceyStacktraceMaxTraces` to retrieves up to max traces by default. The longer the slower, though. (defaults to `128`)
+- Tracey uses `kTraceyStacktraceSkipBegin` to offset head position on every stacktrace (defaults to `0`)
+- Tracey uses `kTraceyStacktraceSkipEnd` to offset tail position on every stacktrace (defaults to `0`)
+- Tracey uses `kTraceyCharLinefeed` to append linefeeds (defaults to `"\n"`)
+- Tracey uses `kTraceyCharTab` to tabulate spaces (defaults to `"\t"`)
+- Tracey uses `kTraceyReportWildPointers` to warn about deallocations on pointers that have been not allocated by Tracey (wild pointers) (defaults to `0`)
+- Tracey uses `kTraceyMemsetAllocations` to force memset of memory allocations (defaults to `0`)
+- Tracey uses `kTraceyReportOnExit` to show a report automatically on application exit (defaults to `1`)
+- Tracey uses `kTraceyWebserverPort` to enable or disable webserver services (defaults to `2001`, `0` to disable)
+- Tracey uses `kTraceyEnabled` to enable or disable whole system quickly (defaults to `1`)
+- Tracey uses `kTraceyDefineCppMemOperators` to implement all new([])/delete([]) operators (defaults to `1`)
+- If `kTraceyDefineCppMemOperators` is disabled, user must provide de/allocation operators thru runtime API (see below).
 
 Runtime API (optional)
 ----------------------
@@ -145,10 +127,13 @@ D:\prj\tracey>sample
 
 Changelog
 ---------
-0.21-b
+
+- 0.22-b
+  - Clean up
+- 0.21-b
   - Tracey requires less memory now.
   - Memory usage shown on tree reports now.
-0.20-b
+- 0.20-b
   - Tracey behaves better in many aspects now.
   - Support for /MT and /MTd on Windows.
   - iOS support.
