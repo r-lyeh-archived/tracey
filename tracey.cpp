@@ -1,9 +1,8 @@
 /*
  * Tracey, a simple and lightweight memory leak detector
- * Copyright (c) 2011,2012,2013 Mario 'rlyeh' Rodriguez
+ * Copyright (c) 2011,2012,2013,2014 Mario 'rlyeh' Rodriguez
  *
  * Callstack code is based on Magnus Norddahl's work (ClanLib).
- * Tiny webserver code is based on Ivan Tikhonov's work.
 
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -81,7 +80,7 @@
  * - rlyeh ~~ listening to Long Distance Calling / Metulsky Curse Revisited
  */
 
-// A few tweaks before loading STL on MSVC
+// A few speed tweaks before loading STL on MSVC
 
 #ifdef _SECURE_SCL
 #undef _SECURE_SCL
@@ -90,17 +89,17 @@
 #ifdef _HAS_ITERATOR_DEBUGGING
 #undef _HAS_ITERATOR_DEBUGGING
 #endif
-#define _HAS_ITERATOR_DEBUGGING 0
+//#define _HAS_ITERATOR_DEBUGGING 0
 
 // Include C, then C++
 
 #include <cassert>
+#include <cctype>
 #include <cstddef>
-#include <cstdlib>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <ctime>
-#include <cctype>
 
 #include <algorithm>
 #include <deque>
@@ -116,38 +115,378 @@
 #include <string>
 #include <vector>
 
-#if __cplusplus > 199711L || (defined(_MSC_VER) && _MSC_VER >= 1700)
-//  if C++11 is supported include std::mutex and std::thread...
-#   include <mutex>
-#   include <thread>
-#else
-//  ...else legacy C++
-#   include "tinythread.h" // header not found? copy tinythread++ sources to tracey's folder!
-    namespace std { using namespace tthread; }
+// Our API {
+#   include "tracey.hpp"
+// }
+
+// external; tree implementation {
+
+//#line 1 "oak.hpp"
+// a simple tree container
+// rlyeh. mit licensed
+
+//#pragma once
+#include <cassert>
+
+#include <algorithm>
+#include <iostream>
+#include <map>
+#include <set>
+#include <string>
+
+namespace oak
+{
+	// tree class
+	// [] means read-writeable (so is <<)
+	// () means read-only access
+
+	template< typename K, typename V = int >
+	class tree : public std::map< K, tree<K,V> > {
+
+			enum { OAK_VERBOSE = false };
+
+			typedef typename std::map< K, tree<K,V> > map;
+
+			template< typename T >
+			T zero() {
+				return std::pair<T,T>().first;
+			}
+
+			template<typename T>
+			T &invalid() const {
+				static T t;
+				return t = T(), t;
+			}
+
+			V value;
+			tree *parent;
+
+		public:
+
+			tree() : map(), value(zero<V>()) {
+				parent = this;
+			}
+
+			tree( const tree &t ) : map(), value(zero<V>()) {
+				parent = this;
+				operator=(t);
+			}
+
+			// tree clone
+
+			tree &operator=( const tree &t ) {
+				if( this != &t ) {
+					this->clear();
+					get() = zero<V>();
+					operator+=(t);
+				}
+				return *this;
+			}
+
+			// tree merge
+
+			tree &operator+=( const tree &t ) {
+				if( this != &t ) {
+					for( typename tree::const_iterator it = t.begin(), end = t.end(); it != end; ++it ) {
+						this->map::insert( *it );
+					}
+					get() = t.get();
+				}
+				return *this;
+			}
+
+			// tree search ; const safe find: no insertions on new searches
+
+			const tree &at( const K &t ) const {
+				typename map::const_iterator find = this->find( t );
+				return find != this->end() ? find->second : invalid<tree>();
+			}
+
+			// tree insertion
+
+			tree &insert( const K &t ) {
+				map &children = *this;
+				( children[t] = children[t] ).parent = this;
+				return children[t];
+			}
+			tree &erase( const K &t ) {
+				typename map::iterator find = this->find(t);
+				if( find != this->end() ) this->map::erase(t);
+				return *this;
+			}
+
+			// recursive values
+
+			V &get() {
+				return value;
+			}
+			const V &get() const {
+				return value;
+			}
+
+			template<typename other>
+			tree &set( const other &t ) {
+				get() = t;
+				return *this;
+			}
+			template<typename other>
+			tree &setup( const other &t ) {
+				if( !is_root() ) {
+					up().set(t).setup(t);
+				}
+				return *this;
+			}
+			template<typename other>
+			tree &setdown( const other &t ) {
+				for( typename tree::iterator it = this->begin(), end = this->end(); it != end; ++it ) {
+					it->second.set(t).setdown( t );
+				}
+				return *this;
+			}
+
+			V getdown() const {
+				V value = get();
+				for( typename tree::const_iterator it = this->begin(), end = this->end(); it != end; ++it ) {
+					value += it->second.getdown();
+				}
+				return value;
+			}
+
+			// sugars
+
+			tree &clone( const tree &t ) {
+				return operator=( t );
+			}
+			tree &assign( const tree &t ) {
+				return operator=( t );
+			}
+
+			template<typename other>
+			tree &operator=( const other &t ) {
+				return set(t);
+			}
+			template<typename other>
+			tree &operator+=( const other &t ) {
+				return get() += t, *this;
+			}
+
+			tree &merge( const tree &t ) {
+				return operator +=( t );
+			}
+			tree &operator[]( const K &t ) {
+				return insert( t );
+			}
+			const tree &operator()( const K &t ) const {
+				return at( t );
+			}
+
+			bool empty( const K &t ) const { // @todo: subempty
+				return this->find(t) == this->end();
+			}
+			bool has( const K &t ) const {
+				return !empty( t );
+			}
+
+			bool is_valid() const {
+				return this != &invalid<tree>();
+			}
+			bool operator!() const {
+				return !is_valid();
+			}
+
+			const map &children() const {
+				return *this;
+			}
+			map &children() {
+				return *this;
+			}
+
+			tree &up() {
+				return *parent;
+			}
+			const tree &up() const {
+				return *parent;
+			}
+
+			bool is_root() const {
+				return parent == this;
+			}
+			const tree &root() const {
+				if( !is_root() ) return parent->root();
+				return *this;
+			}
+			tree &root() {
+				if( !is_root() ) return parent->root();
+				return *this;
+			}
+
+			// tools
+
+			template<typename ostream>
+			void print( ostream &cout = std::cout, unsigned depth = 0 ) const {
+				std::string tabs( depth, '\t' );
+				for( typename tree::const_iterator it = this->begin(), end = this->end(); it != end; ++it ) {
+					cout << tabs << "[" << this->size() << "] " << it->first << " (" << it->second.get() << ")";
+					if( !OAK_VERBOSE ) cout << std::endl;
+					else               cout << ".t=" << this << ",.p=" << parent << std::endl;
+					it->second.print( cout, depth + 1 );
+				}
+			}
+
+			template<typename U, typename ostream>
+			void print( const std::map< K, U > &tmap, ostream &cout, unsigned depth = 0 ) const {
+				std::string tabs( depth, '\t' );
+				for( typename tree::const_iterator it = this->begin(), end = this->end(); it != end; ++it ) {
+					cout << tabs << "[" << this->size() << "] " << tmap.find( it->first )->second << " (" << it->second.get() << ")";
+					if( !OAK_VERBOSE ) cout << std::endl;
+					else               cout << ".t=" << this << ",.p=" << parent << std::endl;
+					it->second.print( tmap, cout, depth + 1 );
+				}
+			}
+
+			template<typename ostream>
+			inline friend ostream &operator<<( ostream &os, const tree &self ) {
+				return self.print( os ), os;
+			}
+
+			template<typename U>
+			tree<U> rekey( const std::map< K, U > &map ) const {
+				tree<U> utree;
+				for( typename tree::const_iterator it = this->begin(), end = this->end(); it != end; ++it ) {
+					typename std::map< K, U >::const_iterator find = map.find( it->first );
+					assert( find != map.end() );
+					utree[ find->second ] += it->second.rekey( map );
+					utree[ find->second ].get() = it->second.get();
+				}
+				return utree;
+			}
+			template<typename U>
+			tree<U> rekey( const std::map< U, K > &map ) const {
+				// this could be faster
+				tree<U> utree;
+				for( typename std::map< U, K >::const_iterator it = map.begin(), end = map.end(); it != end; ++it ) {
+					typename tree::const_iterator find = this->find( it->second );
+					if( find == this->end() ) continue;
+					utree[ it->first ] += find->second.rekey( map );
+					utree[ it->first ].get() = find->second.get();
+				}
+				return utree;
+			}
+
+			tree collapse() const {
+				tree t;
+				if( this->size() == 1 ) {
+					return this->begin()->second.collapse();
+				} else {
+					for( typename tree::const_iterator it = this->begin(), end = this->end(); it != end; ++it ) {
+						t[ it->first ] += it->second.collapse();
+						t[ it->first ].get() = it->second.get();
+					}
+				}
+				return t;
+			}
+
+			V refresh() {
+				V value = !this->size() ? get() : zero<V>();
+				for( typename tree::iterator it = this->begin(), end = this->end(); it != end; ++it ) {
+					value += it->second.refresh();
+				}
+				return get() = value;
+			}
+
+			// c++03 case, user defined operator()
+			// c++11 case, accept lambdas as arguments
+			template<typename T>
+			tree &walk( const T &predicate ) {
+				for( typename tree::iterator it = this->begin(), it_next = it; it != this->end(); it = it_next) {
+					++it_next;
+					if( predicate(*this, it) ) {
+						it->second.walk( predicate );
+					}
+				}
+				return *this;
+			}
+
+			// alias
+			template<typename T>
+			tree &walk() {
+				return walk( T() );
+			}
+	};
+}
+
+
+// }
+
+// external; OS utils. Here is where the fun starts {
+#   define HEAL_MAX_TRACES kTraceyMaxStacktraces
+
+//#line 1 "heal.cpp"
+// A few tweaks before loading STL on MSVC
+// This improves stack unwinding.
+
+#ifdef _SECURE_SCL
+#undef _SECURE_SCL
 #endif
+#define _SECURE_SCL 0
+#ifdef _ITERATOR_DEBUG_LEVEL
+#undef _ITERATOR_DEBUG_LEVEL
+#define _ITERATOR_DEBUG_LEVEL 1
+#endif
+//#define _HAS_ITERATOR_DEBUGGING 0
+
+// Standard headers
+
+#include <cassert>
+#include <cstdarg>
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
+
+#include <algorithm>
+#include <iostream>
+#include <map>
+#include <set>
+#include <sstream>
+#include <stdexcept>
+#include <string>
 
 // System headers
 
-#if defined(_WIN32) || defined(_WIN64)
+#ifdef _WIN32
+//#   define UNICODE
+//#   define _UNICODE
 #   include <winsock2.h>
 #   include <ws2tcpip.h>
-#   include <Windows.h>
+#   include <windows.h>
+#   include <commctrl.h>
+#   pragma comment(lib, "comctl32.lib")
+#   if defined _M_IX86
+#       pragma comment(linker, "/manifestdependency:\"type='win32' name='Microsoft.Windows.Common-Controls' version='6.0.0.0' processorArchitecture='x86' publicKeyToken='6595b64144ccf1df' language='*'\"")
+#   elif defined _M_IA64
+#       pragma comment(linker, "/manifestdependency:\"type='win32' name='Microsoft.Windows.Common-Controls' version='6.0.0.0' processorArchitecture='ia64' publicKeyToken='6595b64144ccf1df' language='*'\"")
+#   elif defined _M_X64
+#       pragma comment(linker, "/manifestdependency:\"type='win32' name='Microsoft.Windows.Common-Controls' version='6.0.0.0' processorArchitecture='amd64' publicKeyToken='6595b64144ccf1df' language='*'\"")
+#   else
+#       pragma comment(linker, "/manifestdependency:\"type='win32' name='Microsoft.Windows.Common-Controls' version='6.0.0.0' processorArchitecture='*' publicKeyToken='6595b64144ccf1df' language='*'\"")
+#   endif
 #   // unwinding
 #   if defined(DEBUG) || defined(_DEBUG)
 #       include <CrtDbg.h>
 #   endif
 #   include <DbgHelp.h>
 #   pragma comment(lib, "dbghelp.lib")
-#   if defined(__GNUC__)
-#       undef __GNUC__                         // switch MingW users here from $gnuc() to $windows()
+#   ifndef TD_SHIELD_ICON
+#       define TD_SHIELD_ICON          MAKEINTRESOURCEW(-4)
 #   endif
 #else
 #   include <unistd.h>
+#   include <signal.h>
 #   include <sys/time.h>
 #   include <sys/types.h>
 //  --
 #   if defined(HAVE_SYS_SYSCTL_H) && \
-        !defined(_SC_NPROCESSORS_ONLN) && !defined(_SC_NPROC_ONLN)
+		!defined(_SC_NPROCESSORS_ONLN) && !defined(_SC_NPROC_ONLN)
 #       include <sys/param.h>
 #       include <sys/sysctl.h>
 #   endif
@@ -157,36 +496,159 @@
 #   include <cxxabi.h>
 #endif
 
+#ifdef __MINGW32__
+#define backtrace(a,b) 0
+#define backtrace_symbols(a,b) 0
+#endif
 
-// Our API
+// API
 
-#include "tracey.hpp"
 
-#if 1
-#   // Disable optimizations. Nothing gets inlined. You get pleasant stacktraces to work with.
-#   // This is the default setting.
-#   ifdef _MSC_VER
-#       pragma optimize( "gsy", off )       // disable optimizations on msvc
-#   else
-#       pragma OPTIMIZE OFF                 // disable optimizations on gcc 4.4+
-#   endif
+//#line 1 "heal.hpp"
+// -- 8< -- 8< -- 8< -- 8< -- 8< -- 8< -- 8< -- 8< -- 8< -- 8< -- 8< -- 8< -- 8< -- 8< -- 8< -- 8< -- 8< -- 8< -- 8< -- 8< --
+
+/* Smart assert replacement for LHS/RHS values
+ * Copyright (c) 2014 Mario 'rlyeh' Rodriguez
+
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in
+ * all copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+ * THE SOFTWARE.
+
+ * - rlyeh ~~ listening to Tuber / Desert Overcrowded
+ */
+
+/* Private API */
+
+#ifndef ASSERTPP_HEADER
+#define ASSERTPP_HEADER
+
+#include <cassert>
+#include <cstdio>
+#include <cstdlib>
+
+#include <deque>
+#include <string>
+#include <sstream>
+
+namespace assertpp {
+	class check {
+		bool ok;
+		std::deque< std::string > xpr;
+		template<typename T> static std::string to_str( const T &t ) { std::stringstream ss; return ss << t ? ss.str() : "??"; }
+	public:
+		check( const char *const text, const char *const file, int line, bool result )
+		:   xpr(4), ok(result)
+		{ xpr[0] = std::string(file) + ':' + to_str(line); xpr[2] = text; }
+		~check() {
+			if( xpr.empty() ) return;
+			operator bool();
+			xpr[0] = xpr[0] + xpr[1];
+			xpr.erase( xpr.begin() + 1 );
+			if( !ok ) {
+				xpr[2] = xpr[2].substr( xpr[2][2] == ' ' ? 3 : 4 );
+				xpr[1].resize( (xpr[1] != xpr[2]) * xpr[1].size() );
+				std::string buf;
+				buf = "<heal/heal.hpp> says: expression failed! (" + xpr[1] + ") -> (" + xpr[2] + ") -> (unexpected) at " + xpr[0] + "\n";
+				fprintf(stderr, "%s", buf.c_str() );
+				// assert fallback here
+				fclose( stderr );
+				fclose( stdout );
+				assert( !"<heal/heal.hpp> says: expression failed!" );
+				// user defined fallbacks here
+				for(;;) {}
+			};
+		}
+#       define assert$impl(OP) \
+		template<typename T> check &operator OP( const T &rhs         ) { return xpr[3] += " "#OP" " + to_str(rhs), *this; } \
+		template<unsigned N> check &operator OP( const char (&rhs)[N] ) { return xpr[3] += " "#OP" " + to_str(rhs), *this; }
+		operator bool() {
+			if( xpr.size() >= 3 && xpr[3].size() >= 6 ) {
+				char sign = xpr[3].at(xpr[3].size()/2+1);
+				bool equal = xpr[3].substr( 4 + xpr[3].size()/2 ) == xpr[3].substr( 3, xpr[3].size()/2 - 3 );
+				ok = ( sign == '=' ? equal : ( sign == '!' ? !equal : ok ) );
+			} return ok;
+		}
+		assert$impl( <); assert$impl(<=); assert$impl( >); assert$impl(>=); assert$impl(!=); assert$impl(==); assert$impl(^=);
+		assert$impl(&&); assert$impl(&=); assert$impl(& ); assert$impl(||); assert$impl(|=); assert$impl(| ); assert$impl(^ );
+#       undef assert$impl
+	};
+}
+
+#endif
+
+/* Public API */
+
+#include <cassert>
+
+#if !(defined(NDEBUG) || defined(_NDEBUG))
+#undef  assert
+#define assert(...) ( bool(__VA_ARGS__) ? \
+		( assertpp::check(#__VA_ARGS__,__FILE__,__LINE__,1) < __VA_ARGS__ ) : \
+		( assertpp::check(#__VA_ARGS__,__FILE__,__LINE__,0) < __VA_ARGS__ ) )
+#endif
+
+// -- 8< -- 8< -- 8< -- 8< -- 8< -- 8< -- 8< -- 8< -- 8< -- 8< -- 8< -- 8< -- 8< -- 8< -- 8< -- 8< -- 8< -- 8< -- 8< -- 8< --
+
+#ifndef __HEALHPP__
+#define __HEALHPP__
+
+#include <stdio.h>
+
+#include <iostream>
+#include <istream>
+#include <map>
+#include <sstream>
+#include <string>
+#include <vector>
+#include <deque>
+
+#if (__cplusplus < 201103L && !defined(_MSC_VER)) || (defined(_MSC_VER) && (_MSC_VER < 1700)) || (defined(__GLIBCXX__) && __GLIBCXX__ < 20130322L)
+#include <boost/function.hpp> // if old libstdc++ or msc libs are found, use boost::function
+#define $cpp11          $no
+#define $cpp03          $yes
+namespace std {
+	using boost::function;
+}
 #else
-#   // Enable optimizations. Tracey performs better. However, functions get inlined (specially new/delete operators).
-#   // This behaviour is disabled by default, since you get weird stacktraces.
-#   ifdef _MSC_VER
-#       pragma optimize( "gsy", on )        // enable optimizations on msvc
-#   else
-#       pragma GCC optimize                 // enable optimizations on gcc 4.4+
-#       pragma optimize                     // enable optimizations on a few other compilers, hopefully
-#   endif
+#include <functional>         // else assume modern c++11 and use std::function<> instead
+#define $cpp11          $yes
+#define $cpp03          $no
+#endif
+
+// Thread Local Storage
+
+#if defined(__MINGW32__) || defined(__SUNPRO_C) || defined(__xlc__) || defined(__GNUC__) || defined(__clang__) || defined(__GNUC__) // __INTEL_COMPILER on linux
+//   MingW, Solaris Studio C/C++, IBM XL C/C++,[3] GNU C,[4] Clang[5] and Intel C++ Compiler (Linux systems)
+#    define $tls(x) __thread x
+#else
+//   Visual C++,[7] Intel C/C++ (Windows systems),[8] C++Builder, and Digital Mars C++
+#    define $tls(x) __declspec(thread) x
 #endif
 
 // OS utils. Here is where the fun starts... good luck
 
-#define $no(...)
-#define $yes(...)     __VA_ARGS__
+#define $quote(...)     #__VA_ARGS__
+#define $comment(...)   $no
+#define $uncomment(...) $yes
 
-#if defined(_WIN32) || defined(_WIN64)
+#define $yes(...)     __VA_ARGS__
+#define $no(...)
+
+#if defined(_WIN32)
 #   define $windows   $yes
 #   define $welse     $no
 #else
@@ -220,7 +682,7 @@
 #   define $debug     $yes
 #endif
 
-#ifdef __GNUC__
+#if defined(__GNUC__) || defined(__MINGW32__)
 #   define $gnuc      $yes
 #   define $gelse     $no
 #else
@@ -248,24 +710,26 @@
 #define $is           $on        // usage: #if $is($debug)
 #define $has(...)     $clang(__has_feature(__VA_ARGS__)) $celse(__VA_ARGS__) // usage: #if $has(cxx_exceptions)
 
-// create a $warning(...) macro
-
-#if $on($msvc)
-#   define $warning(msg) __pragma( message( msg ) )
-#elif defined(__GNUC__) && defined(GCC_VERSION) && GCC_VERSION >= 40400
-#   define $warning$message$impl(msg) _Pragma(#msg)
-#   define $warning(msg) $warning$message$impl( message( msg ) )
+#if $on($msvc) || $on($gnuc) || $on($clang)
+#define $undefined_compiler $no
 #else
-#   define $warning(msg)
+#define $undefined_compiler $yes
+#endif
+
+#if $on($windows) || $on($linux) || $on($apple)
+#define $undefined_os $no
+#else
+#define $undefined_os $yes
 #endif
 
 // try to detect if exceptions are enabled...
 
 #if (defined(_HAS_EXCEPTIONS) && (_HAS_EXCEPTIONS > 0)) || \
-    (defined(_STLP_USE_EXCEPTIONS) && (_STLP_USE_EXCEPTIONS > 0)) || \
-    (defined(HAVE_EXCEPTIONS)) || \
-    (defined(__EXCEPTIONS)) || \
-    ($has(cxx_exceptions)) /*(__has_feature(cxx_exceptions))*/
+	(defined(_STLP_USE_EXCEPTIONS) && (_STLP_USE_EXCEPTIONS > 0)) || \
+	(defined(HAVE_EXCEPTIONS)) || \
+	(defined(__EXCEPTIONS)) || \
+	(defined(_CPPUNWIND)) || \
+	($has(cxx_exceptions)) /*(__has_feature(cxx_exceptions))*/
 #   define $throw     $yes
 #   define $telse     $no
 #else
@@ -273,1441 +737,1598 @@
 #   define $telse     $yes
 #endif
 
+// create a $warning(...) macro
+// usage: $warning("this is shown at compile time")
+#if $on($msvc)
+#   define $warning(msg) __pragma( message( msg ) )
+#elif $on($gnuc) || $on($clang)
+#   define $warning$message$impl(msg) _Pragma(#msg)
+#   define $warning(msg) $warning$message$impl( message( msg ) )
+#else
+#   define $warning(msg)
+#endif
+
+// create a $warning(...) macro
+// usage: $warning("this is shown at compile time")
+#define $heal$todo$stringize$impl(X) #X
+#define $heal$todo$stringize(X) $heal$todo$stringize$impl(X)
+#define $todo(...) $warning( __FILE__ "(" $heal$todo$stringize(__LINE__)") : $todo - " #__VA_ARGS__ " - [ "__func__ " ]" )
+
+/* public API */
+
+namespace heal {
+
+typedef std::function< int( const std::string &in ) > heal_callback_in;
+
+extern std::vector< heal_callback_in > warns;
+extern std::vector< heal_callback_in > fails;
+
+void warn( const std::string &error );
+void fail( const std::string &error );
+
+void add_worker( heal_callback_in fn );
+
+void die( const std::string &reason, int errorcode = -1 );
+void die( int errorcode = -1, const std::string &reason = std::string() );
+
+void breakpoint();
+bool debugger( const std::string &reason = std::string() );
+
+void alert();
+void alert( const          char *t, const std::string &title = std::string() );
+void alert( const   std::string &t, const std::string &title = std::string() );
+void alert( const std::istream &is, const std::string &title = std::string() );
+void alert( const        size_t &t, const std::string &title = std::string() );
+void alert( const        double &t, const std::string &title = std::string() );
+void alert( const         float &t, const std::string &title = std::string() );
+void alert( const           int &t, const std::string &title = std::string() );
+void alert( const          char &t, const std::string &title = std::string() );
+void alert( const          bool &t, const std::string &title = std::string() );
+void errorbox( const std::string &body = std::string(), const std::string &title = std::string() );
+std::string prompt( const std::string &current_value = std::string(), const std::string &title = std::string(), const std::string &caption = std::string() );
+
+bool is_debug();
+bool is_release();
+bool is_asserting();
+
+#ifndef HEAL_MAX_TRACES
+#define HEAL_MAX_TRACES 128
+#endif
+
+struct callstack /* : public std::vector<const void*> */ {
+	enum { max_frames = HEAL_MAX_TRACES };
+	std::vector<void *> frames;
+	callstack( bool autosave = false );
+	size_t space() const;
+	void save( unsigned frames_to_skip = 0 );
+	std::vector<std::string> unwind( unsigned from = 0, unsigned to = ~0 ) const;
+	std::vector<std::string> str( const char *format12 = "#\1 \2\n", size_t skip_begin = 0 ) const;
+	std::string flat( const char *format12 = "#\1 \2\n", size_t skip_begin = 0 ) const;
+};
+
+template<typename T>
+static inline
+std::string lookup( T *ptr ) {
+	callstack cs;
+	cs.frames.push_back( (void *)ptr );
+	std::vector<std::string> stacktrace = cs.unwind();
+	return stacktrace.size() ? stacktrace[0] : std::string("????");
+}
+
+std::string demangle( const std::string &mangled );
+std::vector<std::string> stacktrace( const char *format12 = "#\1 \2\n", size_t skip_initial = 0 );
+std::string stackstring( const char *format12 = "#\1 \2\n", size_t skip_initial = 0 );
+
+std::string hexdump( const void *data, size_t num_bytes, const void *self = 0 );
+
+template<typename T> inline std::string hexdump( const T& obj ) {
+	return hexdump( obj.data(), obj.size() * sizeof(*obj.begin()), &obj );
+}
+$cpp11(
+template<> inline std::string hexdump( const std::nullptr_t &obj ) {
+	return hexdump( 0,0,0 );
+}
+)
+template<> inline std::string hexdump( const char &obj ) {
+	return hexdump( &obj, sizeof(obj), &obj );
+}
+template<> inline std::string hexdump( const short &obj ) {
+	return hexdump( &obj, sizeof(obj), &obj );
+}
+template<> inline std::string hexdump( const long &obj ) {
+	return hexdump( &obj, sizeof(obj), &obj );
+}
+template<> inline std::string hexdump( const long long &obj ) {
+	return hexdump( &obj, sizeof(obj), &obj );
+}
+template<> inline std::string hexdump( const unsigned char &obj ) {
+	return hexdump( &obj, sizeof(obj), &obj );
+}
+template<> inline std::string hexdump( const unsigned short &obj ) {
+	return hexdump( &obj, sizeof(obj), &obj );
+}
+template<> inline std::string hexdump( const unsigned long &obj ) {
+	return hexdump( &obj, sizeof(obj), &obj );
+}
+template<> inline std::string hexdump( const unsigned long long &obj ) {
+	return hexdump( &obj, sizeof(obj), &obj );
+}
+template<> inline std::string hexdump( const float &obj ) {
+	return hexdump( &obj, sizeof(obj), &obj );
+}
+template<> inline std::string hexdump( const double &obj ) {
+	return hexdump( &obj, sizeof(obj), &obj );
+}
+template<> inline std::string hexdump( const long double &obj ) {
+	return hexdump( &obj, sizeof(obj), &obj );
+}/*
+template<size_t N> inline std::string hexdump( const char (&obj)[N] ) {
+	return hexdump( &obj, sizeof(char) * N, &obj );
+}*/
+
+template<typename T> inline std::string hexdump( const T* obj ) {
+	if( !obj ) return hexdump(0,0,0);
+	return hexdump( *obj );
+}
+template<> inline std::string hexdump( const char *obj ) {
+	if( !obj ) return hexdump(0,0,0);
+	return hexdump( std::string(obj) );
+}
+
+std::string timestamp();
+
+}
+
+namespace heal {
+
+	// sfstring is a safe string replacement that does not rely on stringstream
+	// this is actually safer on corner cases, like crashes, exception unwinding and in exit conditions
+	class sfstring : public std::string
+	{
+		public:
+
+		// basic constructors
+
+		sfstring() : std::string()
+		{}
+
+		template<size_t N>
+		sfstring( const char (&cstr)[N] ) : std::string( cstr )
+		{}
+
+		// constructor sugars
+
+#if 0
+		// version that may crash on /MT on destructors
+		// (just because it depends on std::locale which may be deinitialized before crashing code)
+		template <typename T>
+		/* explicit */ sfstring( const T &t ) : std::string()
+		{
+			std::stringstream ss;
+			ss.precision( std::numeric_limits< long double >::digits10 + 1 );
+			if( ss << t )
+				this->assign( ss.str() );
+		}
+#else
+		template<typename T>
+		sfstring( const T &t ) : std::string( std::string(t) )
+		{}
+		sfstring( const std::string &t ) : std::string( t )
+		{}
+
+		sfstring( const int &t ) : std::string() {
+			char buf[128];
+			if( sprintf(buf, "%d", t ) > 0 ) this->assign(buf);
+		}
+		sfstring( const unsigned long &t ) : std::string() {
+			char buf[128];
+			if( sprintf(buf, "%lu", t ) > 0 ) this->assign(buf);
+		}
+		sfstring( const unsigned long long &t ) : std::string() {
+			char buf[128];
+			if( sprintf(buf, "%llu", t ) > 0 ) this->assign(buf);
+		}
+$msvc(
+		sfstring( const size_t &t ) : std::string() {
+			char buf[128];
+			if( sprintf(buf, "%lu", t ) > 0 ) this->assign(buf);
+		}
+)
+
+		sfstring( const float &t ) : std::string() {
+			char buf[128];
+			if( sprintf(buf, "%f", t ) > 0 ) this->assign(buf);
+		}
+		sfstring( const double &t ) : std::string() {
+			char buf[128];
+			if( sprintf(buf, "%f", t ) > 0 ) this->assign(buf);
+		}
+
+		sfstring( const char *t ) : std::string( t ? t : "" )
+		{}
+		sfstring( void *t ) : std::string() {
+			char buf[128];
+			if( sprintf(buf, "%p", t ) > 0 ) this->assign(buf);
+		}
+
+		sfstring( const void *t ) : std::string() {
+			char buf[128];
+			if( sprintf(buf, "%p", t ) > 0 ) this->assign(buf);
+		}
+		sfstring( char *t ) : std::string( t ? t : "" )
+		{}
+#endif
+
+		// extended constructors; safe formatting
+
+		private:
+		template<unsigned N>
+		std::string &safefmt( const std::string &fmt, std::string (&t)[N] ) {
+			for( std::string::const_iterator it = fmt.begin(), end = fmt.end(); it != end; ++it ) {
+				unsigned index(*it);
+				if( index <= N ) t[0] += t[index];
+				else t[0] += *it;
+			}
+			return t[0];
+		}
+		public:
+
+		template< typename T1 >
+		sfstring( const std::string &fmt, const T1 &t1 ) : std::string() {
+			std::string t[] = { std::string(), sfstring(t1) };
+			assign( safefmt( fmt, t ) );
+		}
+
+		template< typename T1, typename T2 >
+		sfstring( const std::string &fmt, const T1 &t1, const T2 &t2 ) : std::string() {
+			std::string t[] = { std::string(), sfstring(t1), sfstring(t2) };
+			assign( safefmt( fmt, t ) );
+		}
+
+		template< typename T1, typename T2, typename T3 >
+		sfstring( const std::string &fmt, const T1 &t1, const T2 &t2, const T3 &t3 ) : std::string() {
+			std::string t[] = { std::string(), sfstring(t1), sfstring(t2), sfstring(t3) };
+			assign( safefmt( fmt, t ) );
+		}
+
+		template< typename T1, typename T2, typename T3, typename T4 >
+		sfstring( const std::string &fmt, const T1 &t1, const T2 &t2, const T3 &t3, const T4 &t4 ) : std::string() {
+			std::string t[] = { std::string(), sfstring(t1), sfstring(t2), sfstring(t3), sfstring(t4) };
+			assign( safefmt( fmt, t ) );
+		}
+
+		template< typename T1, typename T2, typename T3, typename T4, typename T5 >
+		sfstring( const std::string &fmt, const T1 &t1, const T2 &t2, const T3 &t3, const T4 &t4, const T5 &t5 ) : std::string() {
+			std::string t[] = { std::string(), sfstring(t1), sfstring(t2), sfstring(t3), sfstring(t4), sfstring(t5) };
+			assign( safefmt( fmt, t ) );
+		}
+
+		template< typename T1, typename T2, typename T3, typename T4, typename T5, typename T6 >
+		sfstring( const std::string &fmt, const T1 &t1, const T2 &t2, const T3 &t3, const T4 &t4, const T5 &t5, const T6 &t6 ) : std::string() {
+			std::string t[] = { std::string(), sfstring(t1), sfstring(t2), sfstring(t3), sfstring(t4), sfstring(t5), sfstring(t6) };
+			assign( safefmt( fmt, t ) );
+		}
+
+		template< typename T1, typename T2, typename T3, typename T4, typename T5, typename T6, typename T7 >
+		sfstring( const std::string &fmt, const T1 &t1, const T2 &t2, const T3 &t3, const T4 &t4, const T5 &t5, const T6 &t6, const T7 &t7 ) : std::string() {
+			std::string t[] = { std::string(), sfstring(t1), sfstring(t2), sfstring(t3), sfstring(t4), sfstring(t5), sfstring(t6), sfstring(t7) };
+			assign( safefmt( fmt, t ) );
+		}
+
+		// chaining operators
+
+		template< typename T >
+		sfstring &operator +=( const T &t ) {
+			return append( sfstring(t) ), *this;
+		}
+
+		template< typename T >
+		sfstring &operator <<( const T &t ) {
+			return append( sfstring(t) ), *this;
+		}
+
+		sfstring &operator <<( std::ostream &( *pf )(std::ostream &) ) {
+			return *pf == static_cast<std::ostream& ( * )(std::ostream&)>( std::endl ) ? (*this) += "\n", *this : *this;
+		}
+
+		// assignment sugars
+
+		template< typename T >
+		sfstring& operator=( const T &t ) {
+			if( &t != this ) {
+				*this = sfstring(t);
+			}
+			return *this;
+		}
+
+		sfstring &operator=( const char *t ) {
+			return assign( t ? t : "" ), *this;
+		}
+
+		std::string str() const {
+			return *this;
+		}
+
+		size_t count( const std::string &substr ) const {
+			size_t n = 0;
+			std::string::size_type pos = 0;
+			while( (pos = this->find( substr, pos )) != std::string::npos ) {
+				n++;
+				pos += substr.size();
+			}
+			return n;
+		}
+
+		sfstring replace( const std::string &target, const std::string &replacement ) const {
+			size_t found = 0;
+			sfstring s = *this;
+			while( ( found = s.find( target, found ) ) != std::string::npos ) {
+				s.std::string::replace( found, target.length(), replacement );
+				found += replacement.length();
+			}
+			return s;
+		}
+	};
+
+	class sfstrings : public std::deque< sfstring >
+	{
+		public:
+
+		sfstrings( unsigned size = 0 ) : std::deque< sfstring >( size )
+		{}
+
+		template <typename CONTAINER>
+		sfstrings( const CONTAINER &c ) : std::deque< sfstring >( c.begin(), c.end() )
+		{}
+
+		template <typename CONTAINER>
+		sfstrings &operator =( const CONTAINER &c ) {
+			if( &c != this ) {
+				*this = sfstrings( c );
+			}
+			return *this;
+		}
+
+		sfstring str( const char *format1 = "\1\n" ) const {
+			if( this->size() == 1 )
+				return *this->begin();
+
+			sfstring out;
+
+			for( const_iterator it = this->begin(); it != this->end(); ++it )
+				out += sfstring( format1, (*it) );
+
+			return out;
+		}
+
+		sfstring flat() const {
+			return str( "\1" );
+		}
+	};
+}
+
+#endif
+
+// INFO MESSAGES
 // Reminders for retrieving symbols
 
 #  if $on($msvc)
-    $warning( "<tracey/tracey.cpp> says: do not forget /Zi, /Z7 or /C7 compiler settings! /Oy- also helps!" )
+	$warning( "<heal/heal.cpp> says: do not forget /Zi, /Z7 or /C7 compiler settings! /Oy- also helps!" )
 #elif $on($clang)
-    $warning( "<tracey/tracey.cpp> says: do not forget -g compiler setting!" )
+	$warning( "<heal/heal.cpp> says: do not forget -g compiler setting!" )
 #elif $on($gnuc)
-    $warning( "<tracey/tracey.cpp> says: do not forget -g -lpthread compiler settings!" )
+	$warning( "<heal/heal.cpp> says: do not forget -g -lpthread compiler settings!" )
 #endif
 
-// Constants and settings; feel free to tweak these.
-
-#ifndef kTraceyRealloc
-/*  Behaviour is undefined at end of program if kTraceyRealloc() implementation relies on C++ runtime */
-#   define kTraceyRealloc               std::realloc
-#endif
-
-#ifndef kTraceyMemset
-/*  Behaviour is undefined at end of program if kTraceyMemset() implementation relies on C++ runtime */
-#   define kTraceyMemset                std::memset
-#endif
-
-#ifndef kTraceyPrintf
-/*  Behaviour is undefined at end of program if kTraceyPrintf() implementation relies on C++ runtime */
-#   define kTraceyPrintf                std::printf
-#endif
-
-#ifndef kTraceyDie
-/*  Behaviour is undefined at end of program if kTraceyDie() implementation relies on C++ runtime */
-#   define kTraceyDie                   $windows( FatalExit ) $welse( std::exit )
-#endif
-
-#ifndef kTraceyFile
-/*  Behaviour is undefined at end of program if kTraceyFile() implementation relies on C++ runtime */
-#   define kTraceyFile                  std::FILE
-#endif
-
-#ifndef kTraceyfOpen
-/*  Behaviour is undefined at end of program if kTraceyfOpen() implementation relies on C++ runtime */
-#   define kTraceyfOpen                 std::fopen
-#endif
-
-#ifndef kTraceyfPrintf
-/*  Behaviour is undefined at end of program if kTraceyfPrintf() implementation relies on C++ runtime */
-#   define kTraceyfPrintf               std::fprintf
-#endif
-
-#ifndef kTraceyfClose
-/*  Behaviour is undefined at end of program if kTraceyfClose() implementation relies on C++ runtime */
-#   define kTraceyfClose                std::fclose
-#endif
-
-#ifndef kTraceyAssert
-/*  Behaviour is undefined at end of program if kTraceyAssert() implementation relies on C++ runtime */
-#   define kTraceyAssert                assert
-#endif
-
-#ifndef kTraceyAllocsOverhead
-/*  Used to simulate bigger memory requirements  */
-/*  Should be equal or bigger than 1.0           */
-#   define kTraceyAllocsOverhead        1.0
-#endif
-
-#ifndef kTraceyMaxStacktraces
-#   define kTraceyMaxStacktraces        128
-#endif
-
-#ifndef kTraceyStacktraceSkipBegin
-#   define kTraceyStacktraceSkipBegin   0 // $windows(4) $welse(0)
-#endif
-
-#ifndef kTraceyStacktraceSkipEnd
-#   define kTraceyStacktraceSkipEnd     0 // $windows(4) $welse(0)
-#endif
-
-#ifndef kTraceyCharLinefeed
-#   define kTraceyCharLinefeed          "\n"
-#endif
-
-#ifndef kTraceyCharTab
-#   define kTraceyCharTab               "\t"
-#endif
-
-#ifndef kTraceyReportWildPointers
-#   define kTraceyReportWildPointers    0
-#endif
-
-#ifndef kTraceyDefineMemoryOperators
-#   define kTraceyDefineMemoryOperators 1
-#endif
-
-#ifndef kTraceyMemsetAllocations
-#   define kTraceyMemsetAllocations     1
-#endif
-
-#ifndef kTraceyReportOnExit
-#   define kTraceyReportOnExit          1
-#endif
-
-#ifndef kTraceyWebserver
-#   define kTraceyWebserver             1
-#endif
-
-#ifndef kTraceyWebserverPort
-#   define kTraceyWebserverPort         2001
-#endif
-
-#ifndef kTraceyHookLegacyCRT
-#   define kTraceyHookLegacyCRT         0
-#endif
-
-#ifndef kTraceyEnabled
-#   define kTraceyEnabled               1
-#endif
-
-// checks: todo
-// if /MD or /MDd and kTraceyReportWildPointers warn user "not a good idea"
-#if kTraceyHookLegacyCRT
-    $warning( "<tracey/tracey.cpp> says: kTraceyHookLegacyCRT option ignored. CRT hooking not supported on this platform.")
-#   undef  kTraceyHookLegacyCRT
-#   define kTraceyHookLegacyCRT 0
-#endif
-
-// Implementation
-
-namespace tracey
-{
-    static void webmain( void * );
-    static void keymain( void * );
-
-    class string : public std::string
-    {
-        public:
-
-        // basic constructors
-
-        string() : std::string()
-        {}
-
-        template<size_t N>
-        string( const char (&cstr)[N] ) : std::string( cstr )
-        {}
-
-        // constructor sugar
-
-        template< typename T >
-        string( const T &t ) : std::string() {
-            operator=(t);
-        }
-
-        // extended constructors; safe formatting
-
-        private:
-        template<unsigned N>
-        std::string &safefmt( const std::string &fmt, std::string (&t)[N] ) {
-            for( std::string::const_iterator it = fmt.begin(), end = fmt.end(); it != end; ++it ) {
-                unsigned index(*it);
-                if( index <= N ) t[0] += t[index];
-                else t[0] += *it;
-            }
-            return t[0];
-        }
-        public:
-
-        template< typename T1 >
-        string( const std::string &fmt, const T1 &t1 ) : std::string() {
-            std::string t[] = { std::string(), string(t1) };
-            assign( safefmt( fmt, t ) );
-        }
-
-        template< typename T1, typename T2 >
-        string( const std::string &fmt, const T1 &t1, const T2 &t2 ) : std::string() {
-            std::string t[] = { std::string(), string(t1), string(t2) };
-            assign( safefmt( fmt, t ) );
-        }
-
-        template< typename T1, typename T2, typename T3 >
-        string( const std::string &fmt, const T1 &t1, const T2 &t2, const T3 &t3 ) : std::string() {
-            std::string t[] = { std::string(), string(t1), string(t2), string(t3) };
-            assign( safefmt( fmt, t ) );
-        }
-
-        template< typename T1, typename T2, typename T3, typename T4 >
-        string( const std::string &fmt, const T1 &t1, const T2 &t2, const T3 &t3, const T4 &t4 ) : std::string() {
-            std::string t[] = { std::string(), string(t1), string(t2), string(t3), string(t4) };
-            assign( safefmt( fmt, t ) );
-        }
-
-        template< typename T1, typename T2, typename T3, typename T4, typename T5 >
-        string( const std::string &fmt, const T1 &t1, const T2 &t2, const T3 &t3, const T4 &t4, const T5 &t5 ) : std::string() {
-            std::string t[] = { std::string(), string(t1), string(t2), string(t3), string(t4), string(t5) };
-            assign( safefmt( fmt, t ) );
-        }
-
-        template< typename T1, typename T2, typename T3, typename T4, typename T5, typename T6 >
-        string( const std::string &fmt, const T1 &t1, const T2 &t2, const T3 &t3, const T4 &t4, const T5 &t5, const T6 &t6 ) : std::string() {
-            std::string t[] = { std::string(), string(t1), string(t2), string(t3), string(t4), string(t5), string(t6) };
-            assign( safefmt( fmt, t ) );
-        }
-
-        template< typename T1, typename T2, typename T3, typename T4, typename T5, typename T6, typename T7 >
-        string( const std::string &fmt, const T1 &t1, const T2 &t2, const T3 &t3, const T4 &t4, const T5 &t5, const T6 &t6, const T7 &t7 ) : std::string() {
-            std::string t[] = { std::string(), string(t1), string(t2), string(t3), string(t4), string(t5), string(t6), string(t7) };
-            assign( safefmt( fmt, t ) );
-        }
-
-        // chaining operators
-
-        template< typename T >
-        string &operator +=( const T &t ) {
-            append( string(t) );
-            return *this;
-        }
-
-        template< typename T >
-        string &operator <<( const T &t ) {
-            append( string(t) );
-            return *this;
-        }
-
-        string &operator <<( std::ostream &( *pf )(std::ostream &) ) {
-            return *pf == static_cast<std::ostream& ( * )(std::ostream&)>( std::endl ) ? (*this) += "\n", *this : *this;
-        }
-
-        // assignment sugars
-
-        template< typename T >
-        string &operator=( const T &t ) {
-            std::stringstream ss;
-            ss.precision( std::numeric_limits< long double >::digits10 + 1 );
-            if( ss << t )
-                this->assign( ss.str() );
-            return *this;
-        }
-
-        string &operator=( const char *t ) {
-            assign( t ? t : "" );
-            return *this;
-        }
-
-        std::string str() const {
-            return *this;
-        }
-
-        string replace( const std::string &target, const std::string &replacement ) const {
-            size_t found = 0;
-            std::string s = *this;
-
-            while( ( found = s.find( target, found ) ) != string::npos ) {
-                s.replace( found, target.length(), replacement );
-                found += replacement.length();
-            }
-
-            return s;
-        }
-    };
-
-    class strings : public std::deque< string >
-    {
-        public:
-
-        strings( unsigned size = 0 ) : std::deque< string >( size )
-        {}
-
-        template <typename contained>
-        strings( const std::deque<contained> &c ) : std::deque< string >() {
-            operator=( c );
-        }
-
-        template <typename contained>
-        strings &operator =( const std::deque<contained> &c ) {
-            this->resize( c.size() );
-            std::copy( c.begin(), c.end(), this->begin() );
-            return *this;
-        }
-
-        std::string str( const char *format1 = "\1\n" ) const {
-            if( this->size() == 1 )
-                return *this->begin();
-
-            std::string out;
-
-            for( const_iterator it = this->begin(); it != this->end(); ++it )
-                out += string( format1, (*it) );
-
-            return out;
-        }
-
-        std::string flat() const {
-            return str( "\1" );
-        }
-    };
-
-    //#include <map>
-    //#include <iostream>
-
-    // tree class
-    // [] is read-only
-    // () is read-writeable (so is <<)
-
-    template< typename K, typename V = int >
-    class tree : public std::map< K, tree<K,V> > {
-
-            typedef typename std::map< K, tree<K,V> > map;
-
-            template< typename T >
-            T zero() {
-                return std::pair<T,T>().first;
-            }
-
-            template<typename T>
-            T &invalid() const {
-                static T t;
-                return t = T(), t;
-            }
-
-            V value;
-            tree *parent;
-
-        public:
-
-            tree() : map(), value(zero<V>()) {
-                parent = this;
-            }
-
-            tree( const tree &t ) : map(), value(zero<V>()) {
-                parent = this;
-                operator=(t);
-            }
-
-            // tree clone
-
-            tree &operator=( const tree &t ) {
-                if( this != &t ) {
-                    this->clear();
-                    get() = zero<V>();
-                    operator+=(t);
-                }
-                return *this;
-            }
-
-            // tree merge
-
-            tree &operator+=( const tree &t ) {
-                if( this != &t ) {
-                    for( typename tree::const_iterator it = t.begin(), end = t.end(); it != end; ++it ) {
-                        this->map::insert( *it );
-                    }
-                    get() = t.get();
-                }
-                return *this;
-            }
-
-            // tree search ; const safe find: no insertions on new searches
-
-            const tree &at( const K &t ) const {
-                typename map::const_iterator find = this->find( t );
-                return find != this->end() ? find->second : invalid<tree>();
-            }
-
-            // tree insertion
-
-            tree &insert( const K &t ) {
-                map &children = *this;
-                ( children[t] = children[t] ).parent = this;
-                return children[t];
-            }
-            tree &erase( const K &t ) {
-                typename map::iterator find = this->find(t);
-                if( find != this->end() ) this->map::erase(t);
-                return *this;
-            }
-
-            // recursive values
-
-            V &get() {
-                return value;
-            }
-            const V &get() const {
-                return value;
-            }
-
-            template<typename other>
-            tree &set( const other &t ) {
-                get() = t;
-                return *this;
-            }
-            template<typename other>
-            tree &setup( const other &t ) {
-                if( !is_root() ) {
-                    up().set(t).setup(t);
-                }
-                return *this;
-            }
-            template<typename other>
-            tree &setdown( const other &t ) {
-                for( typename tree::iterator it = this->begin(), end = this->end(); it != end; ++it ) {
-                    it->second.set(t).setdown( t );
-                }
-                return *this;
-            }
-
-            V getdown() const {
-                V value = get();
-                for( typename tree::const_iterator it = this->begin(), end = this->end(); it != end; ++it ) {
-                    value += it->second.getdown();
-                }
-                return value;
-            }
-
-            // sugars
-
-            tree &clone( const tree &t ) {
-                return operator=( t );
-            }
-            tree &assign( const tree &t ) {
-                return operator=( t );
-            }
-
-            template<typename other>
-            tree &operator=( const other &t ) {
-                return set(t);
-            }
-            template<typename other>
-            tree &operator+=( const other &t ) {
-                return get() += t, *this;
-            }
-
-            tree &merge( const tree &t ) {
-                return operator +=( t );
-            }
-            const tree &operator[]( const K &t ) const {
-                return at( t );
-            }
-            tree &operator()( const K &t ) {
-                return insert( t );
-            }
-
-            bool has( const K &t ) const { // @todo: subhas
-                return this->find(t) != this->end();
-            }
-
-            bool operator!() const {
-                return this == &invalid<tree>();
-            }
-
-            const map &children() const {
-                return *this;
-            }
-            map &children() {
-                return *this;
-            }
-
-            tree &up() {
-                return *parent;
-            }
-            const tree &up() const {
-                return *parent;
-            }
-
-            bool is_root() const {
-                return parent == this;
-            }
-
-            // tools
-#if 0
-            template<typename ostream>
-            void print( ostream &cout = std::cout, unsigned depth = 0 ) const {
-                std::string tabs( depth, kTraceyCharTab[0] );
-                for( typename tree::const_iterator it = this->begin(), end = this->end(); it != end; ++it ) {
-                    cout << tabs << "[" << this->size() << "] " << it->first << " (" << it->second.get() << ")\n"; // << std::endl;;
-                    it->second.print( cout, depth + 1 );
-                }
-            }
-
-            template<typename ostream, typename U>
-            void print( const std::map< K, U > &tmap, ostream &cout = std::cout, unsigned depth = 0 ) const {
-                std::string tabs( depth, kTraceyCharTab[0] );
-                for( typename tree::const_iterator it = this->begin(), end = this->end(); it != end; ++it ) {
-                    cout << tabs << "[" << this->size() << "] " << tmap.find( it->first )->second << " (" << it->second.get() << ")\n"; // << std::endl;;
-                    it->second.print( tmap, cout, depth + 1 );
-                }
-            }
-#else
-            template<typename U>
-            void print( const std::map< K, U > &tmap, kTraceyFile *cout, unsigned depth = 0 ) const {
-                std::string tabs( depth, kTraceyCharTab[0] );
-                for( typename tree::const_iterator it = this->begin(), end = this->end(); it != end; ++it ) {
-                    kTraceyfPrintf( cout, "%s", (tracey::string() << tabs << "[" << this->size() << "] " << tmap.find( it->first )->second << " (" << it->second.get() << ")\n" ).c_str() ); // << std::endl;;
-                    it->second.print( tmap, cout, depth + 1 );
-                }
-            }
-#endif
-
-            template<typename U>
-            tree<U> rekey( const std::map< K, U > &map ) const {
-                tree<U> utree;
-                for( typename tree::const_iterator it = this->begin(), end = this->end(); it != end; ++it ) {
-                    typename std::map< K, U >::const_iterator find = map.find( it->first );
-                    assert( find != map.end() );
-                    utree( find->second ) += it->second.rekey( map );
-                    utree( find->second ).get() = it->second.get();
-                }
-                return utree;
-            }
-            template<typename U>
-            tree<U> rekey( const std::map< U, K > &map ) const {
-                // this could be faster
-                tree<U> utree;
-                for( typename std::map< U, K >::const_iterator it = map.begin(), end = map.end(); it != end; ++it ) {
-                    typename tree::const_iterator find = this->find( it->second );
-                    if( find == this->end() ) continue;
-                    utree( it->first ) += find->second.rekey( map );
-                    utree( it->first ).get() = find->second.get();
-                }
-                return utree;
-            }
-
-            tree collapse() const {
-                tree t;
-                if( this->size() == 1 ) {
-                    return this->begin()->second.collapse();
-                } else {
-                    for( typename tree::const_iterator it = this->begin(), end = this->end(); it != end; ++it ) {
-                        t( it->first ) += it->second.collapse();
-                        t( it->first ).get() = it->second.get();
-                    }
-                }
-                return t;
-            }
-
-            V refresh() {
-                V value = this->empty() ? get() : zero<V>();
-                for( typename tree::iterator it = this->begin(), end = this->end(); it != end; ++it ) {
-                    value += it->second.refresh();
-                }
-                return get() = value;
-            }
-    };
-
-    namespace {
-        template<typename T>
-        std::ostream &operator <<( std::ostream &os, const tree<T> &t ) {
-            return t.print(os), os;
-        }
-    }
-
-    struct branch {
-        size_t hits;
-        size_t size;
-        double total;
-        branch() : hits(0), size(0), total(0) {
-        }
-        branch( const branch &other ) {
-            operator=( other );
-        }
-        branch &operator =( const branch &other ) {
-            if( this != &other ) {
-                hits = other.hits;
-                size = other.size;
-                total = other.total;
-            }
-            return *this;
-        }
-        branch &operator +=( const branch &other ) {
-            this->size += (other.hits ? other.hits : 1) * other.size;
-            this->total += other.total;
-            return *this;
-        }
-    };
-
-    namespace {
-        std::ostream &operator <<( std::ostream &os, const branch &t ) {
-            std::string human;
-            size_t size = t.size;
-            /**/ if( size >= 1024 * 1024 * 1024 ) human = tracey::string("\1 GB", size / (1024 * 1024 * 1024));
-            else if( size >=        1024 * 1024 ) human = tracey::string("\1 MB", size / (       1024 * 1024));
-            else if( size >=          10 * 1024 ) human = tracey::string("\1 KB", size / (              1024));
-            else                                  human = tracey::string("\1 bytes", size );
-            /**/ if( t.hits > 1 ) return os << human << " * " << (t.hits) << " .. " << int(t.total) << "%";
-            else                  return os << human                      << " .. " << int(t.total) << "%";
-        }
-    }
-
-    std::string demangle( const std::string &mangled ) {
-    $linux({
-        $no( /* c++filt way */
-        FILE *fp = popen( (std::string("echo -n \"") + mangled + std::string("\" | c++filt" )).c_str(), "r" );
-        if (!fp) { return mangled; }
-        char demangled[1024];
-        char *line_p = fgets(demangled, sizeof(demangled), fp);
-        pclose(fp);
-        return demangled;
-        )
-        $yes( /* addr2line way. wip & quick proof-of-concept. clean up required. */
-        tracey::string binary = mangled.substr( 0, mangled.find_first_of('(') );
-        tracey::string address = mangled.substr( mangled.find_last_of('[') + 1 );
-        address.pop_back();
-        tracey::string cmd( "addr2line -e \1 \2", binary, address );
-        FILE *fp = popen( cmd.c_str(), "r" );
-        if (!fp) { return mangled; }
-        char demangled[1024];
-        char *line_p = fgets(demangled, sizeof(demangled), fp);
-        pclose(fp);
-        tracey::string demangled_(demangled);
-        if( demangled_.size() ) demangled_.pop_back(); //remove \n
-        return demangled_.size() && demangled_.at(0) == '?' ? mangled : demangled_;
-        )
-    })
-    $apple({
-        std::stringstream ss;
-        if( !(ss << mangled) )
-            return mangled;
-        std::string number, filename, address, funcname, plus, offset;
-        if( !(ss >> number >> filename >> address >> funcname >> plus >> offset) )
-            return mangled;
-        int status = 0;
-        char *demangled = abi::__cxa_demangle(funcname.c_str(), NULL, NULL, &status);
-        tracey::string out( mangled );
-        if( status == 0 && demangled )
-            out = out.replace( funcname, demangled );
-        if( demangled ) free( demangled );
-        return out;
-    })
-    $windows({
-        char demangled[1024];
-        return (UnDecorateSymbolName(mangled.c_str(), demangled, sizeof( demangled ), UNDNAME_COMPLETE)) ? std::string(demangled) : mangled;
-    })
-    $gnuc({
-        std::string out;
-        int status = 0;
-        char *demangled = abi::__cxa_demangle(mangled.c_str(), 0, 0, &status);
-        out = ( status == 0 && demangled ? std::string(demangled) : mangled );
-        if( demangled ) free( demangled );
-        return out;
-    })
-        return mangled;
-    }
-
-    struct callstack {
-        enum { max_frames = kTraceyMaxStacktraces };
-        std::vector<void *> frames;
-
-        callstack( bool autosave = false ) {
-            if( autosave ) save();
-        }
-
-        size_t space() const {
-            return sizeof(frames) + sizeof(void *) * frames.size();
-        }
-
-        void save( unsigned frames_to_skip = 0 ) {
-
-            if( frames_to_skip > max_frames )
-                return;
-
-            frames.clear();
-            frames.resize( max_frames, (void *)0 );
-            void **out_frames = &frames[0]; // .data();
-
-            $windows({
-                unsigned short capturedFrames = 0;
-
-                // RtlCaptureStackBackTrace is only available on Windows XP or newer versions of Windows
-                typedef WORD(NTAPI FuncRtlCaptureStackBackTrace)(DWORD, DWORD, PVOID *, PDWORD);
-
-                static struct raii
-                {
-                    raii() : module(0), ptrRtlCaptureStackBackTrace(0)
-                    {
-                        module = LoadLibraryA("kernel32.dll");
-                        if( !module )
-                            tracey::fail( "<tracey/tracey.cpp> says: error! cant load kernel32.dll" );
-
-                        ptrRtlCaptureStackBackTrace = (FuncRtlCaptureStackBackTrace *)GetProcAddress(module, "RtlCaptureStackBackTrace");
-                        if( !ptrRtlCaptureStackBackTrace )
-                            tracey::fail( "<tracey/tracey.cpp> says: error! cant find RtlCaptureStackBackTrace() process address" );
-                    }
-                    ~raii() { if(module) FreeLibrary(module); }
-
-                    HMODULE module;
-                    FuncRtlCaptureStackBackTrace *ptrRtlCaptureStackBackTrace;
-                } module;
-
-                if( module.ptrRtlCaptureStackBackTrace )
-                    capturedFrames = module.ptrRtlCaptureStackBackTrace(frames_to_skip+1, max_frames, out_frames, (DWORD *) 0);
-
-                frames.resize( capturedFrames );
-                std::vector<void *>(frames).swap(frames);
-                return;
-            })
-            $gnuc({
-                // Ensure the output is cleared
-                kTraceyMemset(out_frames, 0, (sizeof(void *)) * max_frames);
-
-                frames.resize( backtrace(out_frames, max_frames) );
-                std::vector<void *>(frames).swap(frames);
-                return;
-            })
-        }
-
-        tracey::strings unwind( unsigned from = 0, unsigned to = ~0 ) const
-        {
-            if( to == ~0 )
-                to = this->frames.size();
-
-            if( from > to || from > this->frames.size() || to > this->frames.size() )
-                return tracey::strings();
-
-            const size_t num_frames = to - from;
-            tracey::strings backtraces( num_frames );
-
-            void * const * frames = &this->frames[ from ];
-            const std::string invalid = "????";
-
-            $windows({
-                SymSetOptions(SYMOPT_UNDNAME);
-
-                $no(
-                    // polite version. this is how things should be done.
-                    HANDLE process = GetCurrentProcess();
-                    if( SymInitialize( process, NULL, TRUE ) )
-                )
-                $yes(
-                    // this is what we have to do because other memory managers are not polite enough. fuck them off
-                    static HANDLE process = GetCurrentProcess();
-                    static int init = SymInitialize( process, NULL, TRUE );
-                    if( !init )
-                        tracey::fail( "<tracey/tracey.cpp> says: cannot initialize Dbghelp.lib" );
-                )
-                {
-                    enum { MAXSYMBOLNAME = 512 - sizeof(IMAGEHLP_SYMBOL64) };
-                    char symbol64_buf     [ 512 ];
-                    char symbol64_bufblank[ 512 ] = {0};
-                    IMAGEHLP_SYMBOL64 *symbol64       = reinterpret_cast<IMAGEHLP_SYMBOL64*>(symbol64_buf);
-                    IMAGEHLP_SYMBOL64 *symbol64_blank = reinterpret_cast<IMAGEHLP_SYMBOL64*>(symbol64_bufblank);
-                    symbol64_blank->SizeOfStruct = sizeof(IMAGEHLP_SYMBOL64);
-                    symbol64_blank->MaxNameLength = (MAXSYMBOLNAME-1) / 2; //wchar?
-
-                    IMAGEHLP_LINE64 line64, line64_blank = {0};
-                    line64_blank.SizeOfStruct = sizeof(IMAGEHLP_LINE64);
-
-                    for( unsigned i = 0; i < num_frames; i++ ) {
-                        *symbol64 = *symbol64_blank;
-                        DWORD64 displacement64 = 0;
-
-                        if( SymGetSymFromAddr64( process, (DWORD64) frames[i], &displacement64, symbol64 ) ) {
-                            line64 = line64_blank;
-                            DWORD displacement = 0;
-                            if( SymGetLineFromAddr64( process, (DWORD64) frames[i], &displacement, &line64 ) ) {
-                                backtraces[i] = tracey::string( "\1 (\2, line \3)", symbol64->Name, line64.FileName, line64.LineNumber );
-                            } else {
-                                backtraces[i] = symbol64->Name;
-                            }
-                        } else  backtraces[i] = invalid;
-                    }
-
-                    $no(
-                        // fuck the others. cleanup commented.
-                        SymCleanup(process);
-                    )
-                }
-                DWORD error = GetLastError();
-
-                return backtraces;
-            })
-            $gnuc({
-                char **strings = backtrace_symbols(frames, num_frames);
-
-                // Decode the strings
-                if( strings ) {
-                    for( unsigned i = 0; i < num_frames; i++ ) {
-                        backtraces[i] = ( strings[i] ? demangle(strings[i]) : invalid );
-                    }
-                    free( strings );
-                }
-
-                return backtraces;
-            })
-
-            return backtraces;
-        }
-
-        tracey::strings str( const char *format12 = "#\1 \2\n", size_t skip_begin = 0 ) {
-            tracey::strings stacktrace = unwind( skip_begin );
-
-            for( size_t i = 0, end = stacktrace.size(); i < end; i++ )
-                stacktrace[i] = tracey::string( format12, i + 1, stacktrace[i] );
-
-            return stacktrace;
-        }
-    };
-
-    template<typename T>
-    std::string lookup( T *ptr ) {
-        tracey::callstack cs;
-        cs.frames.push_back( (void *)ptr );
-        tracey::strings stacktrace = cs.unwind();
-        return stacktrace.size() ? stacktrace[0] : std::string("????");
-    }
+// ASSERT
+
+namespace heal {
+
+std::vector< heal_callback_in > warns(1);
+std::vector< heal_callback_in > fails(1);
+
+namespace {
+	bool default_warn( const std::string &text ) {
+		if( text.size() ) {
+			alert( text, "Warning" );
+		}
+		return true;
+	}
+	bool default_fail( const std::string &text ) {
+		if( text.size() ) {
+			errorbox( text, "Error" );
+		}
+		if( !debugger() ) {
+			alert( "Could not launch debugger" );
+		}
+		return true;
+	}
+	const bool init_warns = (warns[0] = default_warn, true);
+	const bool init_fails = (fails[0] = default_fail, true);
 }
 
-namespace tracey
+void warn( const std::string &error ) {
+	static bool recursive = false;
+	if( !recursive ) {
+		recursive = true;
+		for( unsigned i = warns.size(); i--; ) {
+			if( warns[i] ) if( warns[i]( error ) ) break;
+		}
+		recursive = false;
+	}
+}
+
+void fail( const std::string &error ) {
+	static bool recursive = false;
+	if( !recursive ) {
+		recursive = true;
+		for( unsigned i = fails.size(); i--; ) {
+			if( fails[i] ) if( fails[i]( error ) ) break;
+		}
+		recursive = false;
+	}
+}
+
+bool is_asserting()
 {
-    namespace
-    {
-        volatile size_t timestamp_id = 0;
-        struct stats_t {
-            size_t usage, usage_peak, num_leaks, leak_peak, overhead;
-            stats_t() : usage(0), usage_peak(0), num_leaks(0), leak_peak(0), overhead(0) {}
-            std::string str() const {
-                return tracey::string("highest peak: \1 Kb total, \2 Kb greatest peak // \3 allocs in use: \4 Kb + overhead: \5 Kb = total: \6 Kb",
-                                    stats.usage_peak/1024, stats.leak_peak/1024, stats.num_leaks, stats.usage/1024, stats.overhead/1024, stats.usage/1024 + stats.overhead/1024 );
-            }
-        } stats;
+	/*
+	static bool enabled = ( enabled = false, assert( enabled ^= true ), enabled );
+	return enabled;
+	*/
+	/*
+	static struct once { bool are_enabled; once() : are_enabled(false) {
+		assert( are_enabled ^= true );
+	} } asserts;
+	return asserts.are_enabled;
+	*/
+	bool asserting = false;
+	assert( asserting |= true );
+	return asserting;
+}
 
-        size_t create_id() {
-            static size_t id = 0;
-            return ++id;
-        }
+// IS_DEBUG
+// IS_RELEASE
 
-        bool view_report( const std::string &html ) {
-            $windows( return std::system( tracey::string("start \1", html).c_str() ), true );
-            $apple( return std::system( tracey::string("open \1", html).c_str() ), true );
-            $linux( return std::system( tracey::string("xdg-open \1", html).c_str() ), true );
-            return false;
-        }
+bool is_debug() {
+	$debug(
+	return true;
+	)
+	$release(
+	return false;
+	)
+}
+bool is_release() {
+	$release(
+	return true;
+	)
+	$debug(
+	return false;
+	)
+}
 
-        std::string get_temp_pathfile() {
-            $windows(
-                std::string path = std::string( std::getenv("TEMP") ? std::getenv("TEMP") : "." ) + std::tmpnam(0);
-                while( path.size() && path.at( path.size() - 1 ) == '.' ) path.resize( path.size() - 1 );
-                return path;
-            )
-            $welse(
-                return std::string() + std::tmpnam(0);
-            )
-        }
+// DEBUGGER
 
-        struct leak {
-            size_t id, size;
-            const void *addr;
-            tracey::callstack cs;
+#if $on($linux) || $on($apple)
 
-            leak() : size(0), id(0), addr(0)
-            {}
+	// enable core dumps for debug builds
+	// after a crash try to do something like 'gdb ./a.out core'
+#   if defined(NDEBUG) || defined(_NDEBUG)
+		const bool are_coredumps_enabled = false;
+#   else
+#       include <sys/resource.h>
+		rlimit core_limit = { RLIM_INFINITY, RLIM_INFINITY };
+		const bool are_coredumps_enabled = setrlimit( RLIMIT_CORE, &core_limit ) == 0;
+#   endif
 
-            void wipe() {
-                id = create_id();
-                cs = tracey::callstack();
-                size = 0;
-                addr = 0;
-            }
+	struct file {
+		static bool exists( const std::string &pathfile) {
+		/*struct stat buffer;
+		  return stat( pathfile.c_str(), &buffer ) == 0; */
+		  return access( pathfile.c_str(), F_OK ) != -1; // _access(fn,0) on win
+		}
+	};
 
-            ~leak() {
-                wipe();
-            }
-        };
+	bool has( const std::string &app ) {
+		return file::exists( std::string("/usr/bin/") + app );
+	}
 
-        typedef std::vector< const leak * > leaks;
+	std::string pipe( const std::string &sys, const std::string &sys2 = std::string() ) {
+		char buf[512];
+		std::string out;
 
-        struct custom_mutex;
-        custom_mutex *mutex = 0;
+		FILE *fp = popen( (sys+sys2).c_str(), "r" );
+		if( fp ) {
+			while( !std::feof(fp) ) {
+				if( std::fgets(buf,sizeof(buf),fp) != NULL ) {
+					out += buf;
+				}
+			}
+			pclose(fp);
+		}
 
-        class container : public std::map< const void *, leak, std::less< const void * > > //, tracey::malloc_allocator< std::pair< const void *, leak * > > >
-        {
-            public:
+		return out;
+	}
 
-            container() {
-                static tracey::string dummy( 1.0 ); // forces container to be deallocated after trace
-            }
+	// gdb apparently opens FD(s) 3,4,5 (whereas a typical prog uses only stdin=0, stdout=1,stderr=2)
+	// Silviocesare and xorl
+	bool detect_gdb(void)
+	{
+		bool rc = false;
+		FILE *fd = fopen("/tmp", "r");
 
-            ~container() {
-                mutex = 0;
+		if( fileno(fd) > 5 )
+			rc = true;
 
-                // Warning for /MT && kTraceyReportOnExit=1
-                // A crash is likely to happen at this point on some configurations depending on the C/C++ runtime implementation.
-                // Just because we are going to use the runtime C/C++ library (in _report()) *after* it has been probably deallocated.
-                // This only happens when a static runtime library is linked (see flag /MT) and kTraceyReportOnExit is defined to 1.
-                // In order to fix this either use another runtime library (like /MTd, /MD or /MDd), or define kTraceyReportOnExit to 0.
-                // For now, I've made a workaround by enforcing runtime to be deallocated after us (check dummy string on constructor).
-                // So it should work in all cases. Just cross your fingers. Kthx.
+		fclose(fd);
+		return rc;
+	}
 
-                if(kTraceyReportOnExit) {
-                    view_report( _report() );
-                }
+#endif
 
-                // We should clear the memory involved in all allocations but after all, we are a memory tracker and we should be the very
-                // last thing to deallocate in any program. So we don't do it and we save some time for developing when exiting the app.
-                // _clear();
+void breakpoint() {
+// os based
 
-                // Silent exit. Not a requirement in all architectures but who knows. See /MT issue kTraceyPrint() warning above .
-                kTraceyDie( __LINE__ );
-            }
+	$windows(
+	DebugBreak();
+	)
 
-            void _clear() {
+	$linux(
+	raise(SIGTRAP);
+//    asm("trap");
+//    asm("int3");
+//    kill( getpid(), SIGINT );
+	/*
+	kill( getpid(), SIGSTOP );
+	kill( getpid(), SIGTERM );
+	kill( getpid(), SIGHUP );
+	kill( getpid(), SIGTRAP );
+	*/
+	// kill( getpid(), SIGSEGV );
+	// raise(SIGTRAP); //POSIX
+	// raise(SIGINT);  //POSIX
+	)
 
-                for( iterator it = this->begin(), end = this->end(); it != end; ++it ) {
-                    it->second.wipe();
-                }
+	$apple(
+	raise(SIGTRAP);
+	)
 
-                this->clear();
-            }
+// compiler based
 
-            leaks collect_leaks( size_t *wasted ) const {
-                leaks list;
-                *wasted = 0;
-                for( const_iterator it = this->begin(), end = this->end(); it != end; ++it ) {
-                    const tracey::leak &L = it->second;
-                    if( L.addr && L.size && L.id >= timestamp_id ) {
-                        *wasted += L.size;
-                        list.push_back( &L );
-                    }
-                }
-                return list;
-            }
+	//msvc
+	$msvc(
+	// "With native code, I prefer using int 3 vs DebugBreak, because the int 3 occurs right in the same stack frame and module as the code in question, whereas DebugBreak occurs one level down in another DLL, as shown in this callstack:"
+	// [ref] http://blogs.msdn.com/b/calvin_hsia/archive/2006/08/25/724572.aspx
+	// __debugbreak();
+	)
 
-            std::string _report() const {
+	// gnuc
+	$gnuc(
+	//__builtin_trap();
+	//__asm__ __volatile__("int3");
+	)
 
-                std::string logfile = get_temp_pathfile() + "xxx-tracey.html";
+// standard
 
-                kTraceyPrintf( "%s", tracey::string( "<tracey/tracey.cpp> says: summary: \1" kTraceyCharLinefeed, stats.str() ).c_str() );
-                kTraceyPrintf( "%s", tracey::string( "<tracey/tracey.cpp> says: creating report: \1" kTraceyCharLinefeed, logfile).c_str() );
-                kTraceyFile *fp = kTraceyfOpen( logfile.c_str(), "wb" );
+	//abort();
+	//assert( !"<heal/heal.cpp> says: debugger() has been requested" );
+	// still here? duh, maybe we are in release mode...
 
-                // this code often runs at the very end of a program cycle (even when static memory has been deallocated)
-                // so, avoid using global C++ objects like std::cout/cerr as much as possible; otherwise crashes may happen
+// host based
 
-                $windows(
-                    AllocConsole();
-                )
+	//macosx: asm {trap}            ; Halts a program running on PPC32 or PPC64.
+	//macosx: __asm {int 3}         ; Halts a program running on IA-32.
 
-                // Find leaks
-                kTraceyPrintf( "%s", tracey::string("<tracey/tracey.cpp> says: filtering leaks..." kTraceyCharLinefeed).c_str() );
-                size_t wasted, n_leak;
-                leaks filtered = collect_leaks( &wasted );
-                n_leak = filtered.size();
-                kTraceyPrintf( "%s", tracey::string("<tracey/tracey.cpp> says: found \1 leaks wasting \2 bytes" kTraceyCharLinefeed, n_leak, wasted).c_str() );
+	//$x86( // ifdef _M_X86
+	//__asm int 3;
+	//)
+}
 
-                // Calc score
-                double leaks_pct = this->size() ? n_leak * 100.0 / this->size() : 0.0;
-                std::string score = "perfect!";
-                if( leaks_pct >  0.00 ) score = "excellent";
-                if( leaks_pct >  1.25 ) score = "good";
-                if( leaks_pct >  2.50 ) score = "poor";
-                if( leaks_pct >  5.00 ) score = "mediocre";
-                if (leaks_pct > 10.00 ) score = "lame";
+bool debugger( const std::string &reason )
+{
+	if( reason.size() > 0 )
+		errorbox( reason );
 
-                // Header
-                kTraceyfPrintf( fp, "%s", tracey::string( "<html><body><xmp>" ).c_str() );
-                kTraceyfPrintf( fp, "%s", tracey::string( "<tracey/tracey.cpp> says: generated with \1 (\2)" kTraceyCharLinefeed, tracey::version(), tracey::url() ).c_str() );
-                kTraceyfPrintf( fp, "%s", tracey::string( "<tracey/tracey.cpp> says: best viewed on foldable text editor (like SublimeText2) with tabs=2sp and no word-wrap" kTraceyCharLinefeed ).c_str() );
-                kTraceyfPrintf( fp, "%s", tracey::string( "<tracey/tracey.cpp> says: \1, \2 leaks found; \3 bytes wasted ('\4' score)" kTraceyCharLinefeed, !n_leak ? "ok" : "error", n_leak, wasted, score ).c_str() );
-                kTraceyfPrintf( fp, "%s", tracey::string( "<tracey/tracey.cpp> says: summary: \1" kTraceyCharLinefeed, stats.str() ).c_str() );
-                kTraceyfPrintf( fp, "%s", tracey::string( "<tracey/tracey.cpp> says: report filename: \1" kTraceyCharLinefeed, logfile).c_str() );
+// os based
 
-                // Body
-                // Get all frame addresses involved in all leaks
-                // Also, create a tree of frames; so we will take decisions from above by examining node weights (@todo)
-                kTraceyPrintf( "%s", tracey::string("<tracey/tracey.cpp> says: creating trees of frames..."  kTraceyCharLinefeed).c_str() );
-                std::set< void * > set;
-                tracey::tree<void *, branch> tree;
-                tree( (void *)((~0)-0) ); // bottom-top branch
-                tree( (void *)((~0)-1) ); // top-bottom branch
-                for( leaks::const_iterator it = filtered.begin(), end = filtered.end(); it != end; ++it ) {
-                    const leak &L = **it;
-                    const tracey::callstack &callstack = L.cs;
-                    tracey::tree<void *, branch> *_tree = &tree((void *)((~0)-0));
-                    tracey::tree<void *, branch> *_tree_inv = &tree((void *)((~0)-1));
-                    if( callstack.frames.size() )
-                    for( unsigned i = 0, start = kTraceyStacktraceSkipBegin, end = callstack.frames.size() - 1 - kTraceyStacktraceSkipEnd; start+i <= end; ++i ) {
+	$windows(
+		if( IsDebuggerPresent() )
+			int(), true;
+	)
 
-                        (*_tree)( callstack.frames[start + i] ).get().size = L.size;
-                        (*_tree)( callstack.frames[start + i] ).get().hits ++;
-                        (*_tree)( callstack.frames[start + i] ).get().total = 100.0 * L.size / wasted *
-                        ( (*_tree)( callstack.frames[start + i] ).get().hits );
-                        _tree = &(*_tree)( callstack.frames[start + i] );
-                        set.insert( callstack.frames[start + i] );
+	$linux(
+		if( detect_gdb() ) {
+			int(), true;
+		}
+		// else try to invoke && attach to current process
 
-                        (*_tree_inv)( callstack.frames[end - i] ).get().size = L.size;
-                        (*_tree_inv)( callstack.frames[end - i] ).get().hits ++;
-                        (*_tree_inv)( callstack.frames[end - i] ).get().total = 100.0 * L.size / wasted *
-                        ( (*_tree_inv)( callstack.frames[end - i] ).get().hits );
-                        _tree_inv = &(*_tree_inv)( callstack.frames[end - i] );
-                        set.insert( callstack.frames[end - i] );
-                    }
-                }
+		static std::string sys, tmpfile;
+		sys = ( has("ddd") && false ? "/usr/bin/ddd" : ( has("gdb") ? "/usr/bin/gdb" : "" ));
+		tmpfile = "./heal.tmp.tmp"; //get_pipe("tempfile");
+		if( !sys.empty() ) {
+			std::string pid = std::to_string( getpid() );
+			// [ok]
+			// eval-command=bt
+			// -ex "bt full"
+			// gdb --batch --quiet -ex "thread apply all bt full" -ex "quit" ${exe} ${corefile}
+			sys = sys + (" --tui -q -ex 'set pagination off' -ex 'shell rm " +tmpfile+ "' -ex 'continue' -ex 'finish' -ex 'finish' -ex 'finish' --pid=") + pid + " --args `cat /proc/" + pid + "/cmdline`";
+			if( has("xterm") && false ) {
+				sys = std::string("/usr/bin/xterm 2>/dev/null -maximized -e \"") + sys + "\"";
+			} else {
+				//sys = std::string(/*"exec"*/ "/usr/bin/splitvt -upper \"") + sys + "\"";
+				//sys = std::string("/bin/bash -c \"") + sys + " && /usr/bin/reset\"";
+				sys = std::string("/bin/bash -c \"") + sys + "\"";
+			}
 
-                // Some apps are low on memory in here, so we free memory as soon as possible
-                filtered = leaks();
+		pipe( "echo heal.cpp says: waiting for debugger to catch pid > ", tmpfile );
+		std::thread( system, sys.c_str() ).detach();
+		while( file::exists(tmpfile) )
+			usleep( 250000 );
+				return true;
+		}
+	)
 
-                if( !set.size() ) {
-                    if( n_leak ) {
-                        kTraceyPrintf( "%s", tracey::string("<tracey/tracey.cpp> says: error! failed to resolve symbols." $msvc(" Are PDB files available?") kTraceyCharLinefeed).c_str() );
-                    }
-                } else {
-                    kTraceyPrintf( "%s", tracey::string("<tracey/tracey.cpp> says: resolving \1 unique frames..." kTraceyCharLinefeed, set.size()).c_str() );
-                    // convert set of unique frames into array of frames
-                    tracey::callstack cs;
-                    std::vector< void * > &frames = cs.frames;
-                    frames.reserve( set.size() );
-                    for( std::set< void * >::iterator it = set.begin(), end = set.end(); it != end; ++it ) {
-                        frames.push_back( *it );
-                    }
-                    tracey::strings symbols = cs.unwind();
-                    std::map< void *, std::string > translate;
-                    {
-                        if( frames.size() != symbols.size() ) {
-                            kTraceyfPrintf( fp, "%s", tracey::string("<tracey/tracey.cpp> says: error! cannot resolve all frames (\1 vs \2)!" kTraceyCharLinefeed, frames.size(), symbols.size() ).c_str() );
-                            for( unsigned i = 0, end = frames.size(); i < end; ++i ) {
-                                translate[ frames[i] ] = tracey::string("\1", frames[i]);
-                            }
-                        } else {
-                            for( unsigned i = 0, end = frames.size(); i < end; ++i ) {
-                                translate[ frames[i] ] = symbols[ i ];
-                            }
-                        }
-                        // Create a tree report, if possible
-                        kTraceyPrintf( "%s", tracey::string("<tracey/tracey.cpp> says: converting tree of frames into tree of symbols..." kTraceyCharLinefeed).c_str() );
+	//errorbox( "<heal/heal.cpp> says:\n\nDebugger invokation failed.\nPlease attach a debugger now.", "Error!");
+	return false;
+}
+
+// ERRORBOX
+
+namespace {
+
+	template<typename T>
+	std::string to_string( const T &t, int digits = 20 ) {
+		std::stringstream ss;
+		ss.precision( digits );
+		ss << std::fixed << t;
+		return ss.str();
+	}
+
+	template<>
+	std::string to_string( const bool &boolean, int digits ) {
+		return boolean ? "true" : "false";
+	}
+
+	template<>
+	std::string to_string( const std::istream &is, int digits ) {
+		std::stringstream ss;
+		std::streamsize at = is.rdbuf()->pubseekoff(0,is.cur);
+		ss << is.rdbuf();
+		is.rdbuf()->pubseekpos(at);
+		return ss.str();
+	}
+
+	void show( const std::string &body = std::string(), const std::string &head = std::string(), const std::string &title = std::string(), bool is_error = false ) {
+		std::string headtitle = ( head.size() > 0 ? head + ": " + title : title );
+		std::string headtitlebody = ( headtitle.size() > 0 ? headtitle + ": " + body : body );
+		$windows(
+			$no(
+			int nButton;
+			auto icon = is_error ? TD_ERROR_ICON : TD_WARNING_ICON;
+			// TD_INFORMATION_ICON, TD_SHIELD_ICON
+			std::wstring wbody( body.begin(), body.end() );
+			std::wstring whead( head.begin(), head.end() );
+			std::wstring wtitle( title.begin(), title.end() );
+			HWND hWnd = ::GetActiveWindow(); // force modal
+			TaskDialog(hWnd, NULL, wtitle.c_str(), whead.c_str(), wbody.c_str(), TDCBF_OK_BUTTON, icon, &nButton );
+			)
+			$yes(
+			MessageBoxA( 0, body.c_str(), head.size() ? head.c_str() : "", 0 | ( is_error ? MB_ICONERROR : 0 ) | MB_SYSTEMMODAL );
+			)
+			return;
+		)
+		$linux(
+			if( has("whiptail") ) {
+				// gtkdialog3
+				// xmessage -file ~/.bashrc -buttons "Ok:1, Cancel:2, Help:3" -print -nearmouse
+				//std::string cmd = std::string("/usr/bin/zenity --information --text \"") + body + std::string("\" --title=\"") + headtitle + "\"";
+				//std::string cmd = std::string("/usr/bin/dialog --title \"") + headtitle + std::string("\" --msgbox \"") + body + "\" 0 0";
+				std::string cmd = std::string("/usr/bin/whiptail --title \"") + headtitle + std::string("\" --msgbox \"") + body + "\" 0 0";
+				//std::string cmd = std::string("/usr/bin/xmessage \"") + headtitle + body + "\"";
+				std::system( cmd.c_str() );
+				return;
+			}
+		)
+		// fallback
+		std::string s;
+		fprintf( stderr, "%s\n", headtitlebody.c_str() );
+		std::cout << "Press enter to continue..." << std::endl;
+		std::getline( std::cin, s );
+	}
+}
+
+void    alert(                                                    ) { show();                        }
+void    alert( const         char *text, const std::string &title ) { show( text, title );           }
+void    alert( const  std::string &text, const std::string &title ) { show( text, title );           }
+void    alert( const std::istream &text, const std::string &title ) { show( to_string(text), title ); }
+void    alert( const       size_t &text, const std::string &title ) { show( to_string(text), title ); }
+void    alert( const       double &text, const std::string &title ) { show( to_string(text), title ); }
+void    alert( const        float &text, const std::string &title ) { show( to_string(text), title ); }
+void    alert( const          int &text, const std::string &title ) { show( to_string(text), title ); }
+void    alert( const         char &text, const std::string &title ) { show( to_string(text), title ); }
+void    alert( const         bool &text, const std::string &title ) { show( to_string(text), title ); }
+void errorbox( const  std::string &body, const std::string &title ) { show( body, title, "", true );  }
+
+// DEMANGLE
+
 #if 1
-                        translate[ (void *)((~0)-1) ] = "leak beginnings";
-                        translate[ (void *)((~0)-0) ] = "leak endings";
-                        kTraceyPrintf( "%s", tracey::string("<tracey/tracey.cpp> says: flattering tree of symbols..." kTraceyCharLinefeed).c_str() );
-                        tree.refresh();
-						//tree.collapse().print(translate, fp);
-                        tree.print(translate, fp);
+#   // Disable optimizations. Nothing gets inlined. You get pleasant stacktraces to work with.
+#   // This is the default setting.
+#   ifdef _MSC_VER
+#       pragma optimize( "gsy", off )       // disable optimizations on msvc
+#   else
+#       pragma OPTIMIZE OFF                 // disable optimizations on gcc 4.4+
+#   endif
 #else
-                        kTraceyfPrintf( fp, "%s", std::string(64, '-') << "bottom-top tree (leakers)" << std::string(64, '-') << std::en ).c_str()dl;
-                        tree.rekey(translate).print(log);
-                        kTraceyfPrintf( fp, "%s", std::string(64, '-') << "top-bottom tree (traces)" << std::string(64, '-') << std::en ).c_str()dl;
-                        tree_inv.rekey(translate).print(log);
-#endif
-                    }
-                }
-
-                // Footer
-                kTraceyfPrintf( fp, "%s", tracey::string( "</xmp></body></html>" ).c_str() );
-                kTraceyfClose( fp );
-
-                return logfile;
-            }
-        };
-
-        void *tracer( void *ptr, size_t &size );
-
-        bool init() {
-            static bool once = false; if(! once ) { once = true;
-                kTraceyPrintf( "%s", tracey::settings().c_str() );
-                if( kTraceyWebserver ) {
-                    volatile bool sitdown = false;
-                    // std::thread( tracey::webmain, &sitdown ).detach();
-                    // old tinythread versions do not support detach, so workaround following:
-                    new std::thread( tracey::webmain, (void *)&sitdown );
-                    while( !sitdown ) {
-                    $windows( Sleep( 1000 ) );
-                    $welse( sleep( 1 ) );
-                    }
-                }
-                if( 1 ) {
-                    volatile bool sitdown = false;
-                    new std::thread( tracey::keymain, (void *)&sitdown );
-                    while( !sitdown ) {
-                    $windows( Sleep( 1000 ) );
-                    $welse( sleep( 1 ) );
-                    }
-                }
-                // Construct internals of tracer (static initializers)
-                size_t dummy = 0;
-                tracer( 0, dummy );
-            }
-            return true;
-        }
-
-        struct dummy_mutex {
-            volatile bool recursive;
-            dummy_mutex() : recursive(false) {
-            }
-            bool try_lock() {
-                if( recursive ) {
-                    return false;
-                }
-                recursive = true;
-                return true;
-            }
-            void unlock() { recursive = false; }
-        };
-
-        struct complex_mutex {
-            std::recursive_mutex first;
-            volatile bool recursive;
-            complex_mutex() : recursive(false) {
-            }
-
-            bool try_lock() {
-                // block allocations coming from different threads
-                first.lock();
-
-                // discard any recursive allocations
-                if( recursive ) {
-                    first.unlock();
-                    return false;
-                }
-                recursive = true;
-                return true;
-            }
-
-            void unlock() {
-                recursive = false;
-                first.unlock();
-            }
-        };
-
-#if kTraceyHookLegacyCRT
-        struct custom_mutex : dummy_mutex {
-#else
-        struct custom_mutex : complex_mutex {
-#endif
-            container map;
-
-            custom_mutex() {
-                mutex = (this);
-            }
-
-            ~custom_mutex() { mutex = 0; }
-        };
-
-        bool is_recursive() {
-            if( !mutex )
-                return false;
-
-            return mutex->recursive;
-        }
-
-        void *tracer( void *ptr, size_t &size )
-        {
-            if( !kTraceyEnabled )
-                return size = 0, ptr;
-
-            { static custom_mutex m; }
-
-            if( !ptr )
-                return size = 0, ptr;
-
-            // threads will lock here till the slot is free.
-            // threads will return on recursive locks.
-            if( !mutex )
-                return size = 0, ptr;
-
-            if( !mutex->try_lock() )
-                return size = 0, ptr;
-
-#if         kTraceyHookLegacyCRT
-            // do nothing
-#else
-            static const bool init = tracey::init();
+#   // Enable optimizations. HEAL performs better. However, functions get inlined (specially new/delete operators).
+#   // This behaviour is disabled by default, since you may get wrong stacktraces.
+#   ifdef _MSC_VER
+#       pragma optimize( "gsy", on )        // enable optimizations on msvc
+#   else
+#       pragma GCC optimize                 // enable optimizations on gcc 4.4+
+#       pragma optimize                     // enable optimizations on a few other compilers, hopefully
+#   endif
 #endif
 
-            container &map = mutex->map;
-            // ready
-            container::iterator it = map.find( ptr );
-            bool found = ( it != map.end() );
-
-            if( size == ~0 )
-            {
-                if( found )
-                {
-                    leak &L = it->second;
-                    stats.overhead -= L.cs.space();
-                    stats.usage -= L.size;
-                    stats.num_leaks--;
-                    L.wipe();
-                }
-                else
-                {
-                    // 1st) wild pointer deallocation found; warn user
-                    if( kTraceyReportWildPointers )
-                        kTraceyPrintf( "%s", (tracey::string( "<tracey/tracey.cpp> says: Error, wild pointer deallocation." kTraceyCharLinefeed ) +
-                            tracey::callstack( true ).str( kTraceyCharTab "\1) \2" kTraceyCharLinefeed, kTraceyStacktraceSkipBegin).flat() ).c_str() );
-
-                    // 2nd) normalize ptr for further deallocation (deallocating null pointers is ok)
-                    ptr = 0;
-                }
-            }
-            else
-            if( size == (~0) - 1 )
-            {
-                int code = *((int*)ptr);
-                //ptr = 0;
-                if( code == 1 ) {
-                    stats = stats_t();
-                    map._clear(), timestamp_id = create_id();
-                }
-
-                if( code == 2 ) { *((stats_t*)ptr) = stats; };
-                if( code == 3 ) (void)0;
-                if( code == 4 ) (void)0;
-            }
-            else
-            if( size == (~0) - 2 )
-            {
-                static char placement[ sizeof(std::string) ];
-                static std::string *log = new ((std::string *)placement) std::string();
-                *log = map._report();
-                ptr = (void *)log;
-            }
-            else
-            if( size == (~0) - 3 )
-            {
-                std::string &log = *((std::string *)(ptr));
-                view_report( log );
-            }
-            else
-            if( size == (~0) - 4 )
-            {
-                static char placement[ sizeof(std::string) ];
-                static std::string *log = new ((std::string *)placement) std::string();
-                *log = stats.str();
-                ptr = (void *)log;
-            }
-            else
-            {
-                if( found ) {
-                    // kTraceyAssert( !map[ptr].first );
-                    // kTraceyAssert( !map[ptr].second );
-                }
-
-                // create a leak and (re)insert it into map
-                tracey::leak &leak = (map[ptr] = map[ptr]);
-                leak.wipe();
-                leak.addr = ptr;
-                leak.size = size;
-                leak.cs.save();
-                stats.num_leaks++;
-                stats.usage += size;
-                stats.overhead += leak.cs.space();
-                if( leak.size   > stats.leak_peak  ) stats.leak_peak = leak.size;
-                if( stats.usage > stats.usage_peak ) stats.usage_peak = stats.usage;
-            }
-
-            mutex->unlock();
-
-            return ptr;
-        }
-    };
+std::string demangle( const std::string &mangled ) {
+	$linux({
+		$no( /* c++filt way */
+		FILE *fp = popen( (std::string("echo -n \"") + mangled + std::string("\" | c++filt" )).c_str(), "r" );
+		if (!fp) { return mangled; }
+		char demangled[1024];
+		char *line_p = fgets(demangled, sizeof(demangled), fp);
+		pclose(fp);
+		return demangled;
+		)
+		$yes( /* addr2line way. wip & quick proof-of-concept. clean up required. */
+		heal::sfstring binary = mangled.substr( 0, mangled.find_first_of('(') );
+		heal::sfstring address = mangled.substr( mangled.find_last_of('[') + 1 );
+		address.pop_back();
+		heal::sfstring cmd( "addr2line -e \1 \2", binary, address );
+		FILE *fp = popen( cmd.c_str(), "r" );
+		if (!fp) { return mangled; }
+		char demangled[1024];
+		char *line_p = fgets(demangled, sizeof(demangled), fp);
+		pclose(fp);
+		heal::sfstring demangled_(demangled);
+		if( demangled_.size() ) demangled_.pop_back(); //remove \n
+		return demangled_.size() && demangled_.at(0) == '?' ? mangled : demangled_;
+		)
+	})
+	$apple({
+		std::stringstream ss;
+		if( !(ss << mangled) )
+			return mangled;
+		std::string number, filename, address, funcname, plus, offset;
+		if( !(ss >> number >> filename >> address >> funcname >> plus >> offset) )
+			return mangled;
+		int status = 0;
+		char *demangled = abi::__cxa_demangle(funcname.c_str(), NULL, NULL, &status);
+		heal::sfstring out( mangled );
+		if( status == 0 && demangled )
+			out = out.replace( funcname, demangled );
+		if( demangled ) free( demangled );
+		return out;
+	})
+	$windows({
+		char demangled[1024];
+		return (UnDecorateSymbolName(mangled.c_str(), demangled, sizeof( demangled ), UNDNAME_COMPLETE)) ? std::string(demangled) : mangled;
+	})
+	/*
+	$gnuc({
+		std::string out;
+		int status = 0;
+		char *demangled = abi::__cxa_demangle(mangled.c_str(), 0, 0, &status);
+		out = ( status == 0 && demangled ? std::string(demangled) : mangled );
+		if( demangled ) free( demangled );
+		return out;
+	})
+	*/
+		return mangled;
 }
 
-namespace tracey
+// CALLSTACK
+
+		callstack::callstack( bool autosave ) {
+			if( autosave ) save();
+		}
+
+		size_t callstack::space() const {
+			return sizeof(frames) + sizeof(void *) * frames.size();
+		}
+
+		void callstack::save( unsigned frames_to_skip ) {
+
+			if( frames_to_skip > max_frames )
+				return;
+
+			frames.clear();
+			frames.resize( max_frames, (void *)0 );
+			void **out_frames = &frames[0]; // .data();
+
+			$windows({
+				unsigned short capturedFrames = 0;
+
+				// RtlCaptureStackBackTrace is only available on Windows XP or newer versions of Windows
+				typedef WORD(NTAPI FuncRtlCaptureStackBackTrace)(DWORD, DWORD, PVOID *, PDWORD);
+
+				static struct raii
+				{
+					raii() : module(0), ptrRtlCaptureStackBackTrace(0)
+					{
+						module = LoadLibraryA("kernel32.dll");
+						if( !module )
+							fail( "<heal/heal.cpp> says: error! cant load kernel32.dll" );
+
+						ptrRtlCaptureStackBackTrace = (FuncRtlCaptureStackBackTrace *)GetProcAddress(module, "RtlCaptureStackBackTrace");
+						if( !ptrRtlCaptureStackBackTrace )
+							fail( "<heal/heal.cpp> says: error! cant find RtlCaptureStackBackTrace() process address" );
+					}
+					~raii() { if(module) FreeLibrary(module); }
+
+					HMODULE module;
+					FuncRtlCaptureStackBackTrace *ptrRtlCaptureStackBackTrace;
+				} module;
+
+				if( module.ptrRtlCaptureStackBackTrace )
+					capturedFrames = module.ptrRtlCaptureStackBackTrace(frames_to_skip+1, max_frames, out_frames, (DWORD *) 0);
+
+				frames.resize( capturedFrames );
+				std::vector<void *>(frames).swap(frames);
+				return;
+			})
+			$gnuc({
+				// Ensure the output is cleared
+				std::memset(out_frames, 0, (sizeof(void *)) * max_frames);
+
+				frames.resize( backtrace(out_frames, max_frames) );
+				std::vector<void *>(frames).swap(frames);
+				return;
+			})
+		}
+
+		std::vector<std::string> callstack::unwind( unsigned from, unsigned to ) const
+		{
+			if( to == ~0 )
+				to = this->frames.size();
+
+			if( from > to || from > this->frames.size() || to > this->frames.size() )
+				return std::vector<std::string>();
+
+			const size_t num_frames = to - from;
+			std::vector<std::string> backtraces( num_frames );
+
+			void * const * frames = &this->frames[ from ];
+			const std::string invalid = "????";
+
+			$windows({
+				SymSetOptions(SYMOPT_UNDNAME);
+
+				$no(
+					// polite version. this is how things should be done.
+					HANDLE process = GetCurrentProcess();
+					if( SymInitialize( process, NULL, TRUE ) )
+				)
+				$yes(
+					// this is what we have to do because other memory managers are not polite enough. fuck them off
+					static HANDLE process = GetCurrentProcess();
+					static int init = SymInitialize( process, NULL, TRUE );
+					if( !init )
+						fail( "<heal/heal.cpp> says: cannot initialize Dbghelp.lib" );
+				)
+				{
+					enum { MAXSYMBOLNAME = 512 - sizeof(IMAGEHLP_SYMBOL64) };
+					char symbol64_buf     [ 512 ];
+					char symbol64_bufblank[ 512 ] = {0};
+					IMAGEHLP_SYMBOL64 *symbol64       = reinterpret_cast<IMAGEHLP_SYMBOL64*>(symbol64_buf);
+					IMAGEHLP_SYMBOL64 *symbol64_blank = reinterpret_cast<IMAGEHLP_SYMBOL64*>(symbol64_bufblank);
+					symbol64_blank->SizeOfStruct = sizeof(IMAGEHLP_SYMBOL64);
+					symbol64_blank->MaxNameLength = (MAXSYMBOLNAME-1) / 2; //wchar?
+
+					IMAGEHLP_LINE64 line64, line64_blank = {0};
+					line64_blank.SizeOfStruct = sizeof(IMAGEHLP_LINE64);
+
+					for( unsigned i = 0; i < num_frames; i++ ) {
+						*symbol64 = *symbol64_blank;
+						DWORD64 displacement64 = 0;
+
+						if( SymGetSymFromAddr64( process, (DWORD64) frames[i], &displacement64, symbol64 ) ) {
+							line64 = line64_blank;
+							DWORD displacement = 0;
+							if( SymGetLineFromAddr64( process, (DWORD64) frames[i], &displacement, &line64 ) ) {
+								backtraces[i] = heal::sfstring( "\1 (\2, line \3)", symbol64->Name, line64.FileName, line64.LineNumber );
+							} else {
+								backtraces[i] = symbol64->Name;
+							}
+						} else  backtraces[i] = invalid;
+					}
+
+					$no(
+						// fuck the others. cleanup commented.
+						SymCleanup(process);
+					)
+				}
+				DWORD error = GetLastError();
+
+				return backtraces;
+			})
+			$gnuc({
+				char **strings = backtrace_symbols(frames, num_frames);
+
+				// Decode the strings
+				if( strings ) {
+					for( unsigned i = 0; i < num_frames; i++ ) {
+						backtraces[i] = ( strings[i] ? demangle(strings[i]) : invalid );
+					}
+					free( strings );
+				}
+
+				return backtraces;
+			})
+
+			return backtraces;
+		}
+
+		std::vector<std::string> callstack::str( const char *format12, size_t skip_begin ) const {
+			callstack copy = *this;
+			std::vector<std::string> stacktrace = copy.unwind( skip_begin );
+
+			for( size_t i = 0, end = stacktrace.size(); i < end; i++ )
+				stacktrace[i] = heal::sfstring( format12, i + 1, stacktrace[i] );
+
+			return stacktrace;
+		}
+
+		std::string callstack::flat( const char *format12, size_t skip_begin ) const {
+			std::vector<std::string> vec = str( format12, skip_begin );
+			std::string str;
+			for( std::vector<std::string>::const_iterator it = vec.begin(), end = vec.end(); it != end; ++it ) {
+				str += *it;
+			}
+			return str;
+		}
+
+std::vector<std::string> stacktrace( const char *format12, size_t skip_initial ) {
+	return callstack(true).str( format12, skip_initial );
+}
+
+std::string stackstring( const char *format12, size_t skip_initial ) {
+	std::string out;
+	std::vector<std::string> stack = stacktrace( format12, skip_initial );
+	for( std::vector<std::string>::const_iterator it = stack.begin(), end = stack.end(); it != end; ++it ) {
+		out += *it;
+	}
+	return out;
+}
+
+// DIE
+
+void die( const std::string &reason, int errorcode )
 {
-    void *watch( const void *ptr, size_t size ) {
-        tracer( (void *)ptr, size );
-        return (void *)ptr;
-    }
-    void *forget( const void *ptr ) {
-        size_t forget = (~0);
-        tracer( (void *)ptr, forget );
-        return (void *)ptr;
-    }
-    void restart() {
-        size_t opcode = 1, special_fn = (~0) - 1;
-        tracer( &opcode, special_fn );
-    }
-    std::string report() {
-        size_t special_fn = (~0) - 2;
-        return *((std::string *)tracer( &report, special_fn ));
-    }
-    void view( const std::string &report ) {
-        std::string copy = report;
-        size_t special_fn = (~0) - 3;
-        tracer( &copy, special_fn );
-    }
-    std::string summary() {
-        size_t special_fn = (~0) - 4;
-        return *((std::string *)tracer( &report, special_fn ));
-    }
-    void fail( const char *message ) {
-        kTraceyPrintf( "%s\n", message );
-        kTraceyAssert( !"<tracey/tracey.cpp> says: fail() requested" );
-        $throw(
-            throw std::runtime_error( message );
-        )
-        $telse(
-            kTraceyDie(__LINE__);
-        )
-    }
-    void badalloc() {
-        $throw(
-            throw std::bad_alloc();
-        )
-        tracey::fail( "<tracey/tracey.cpp> says: error! out of memory" );
-    }
-    std::string version() {
-        return "tracey-0.21.b";  /* format is major.minor.(a)lpha/(b)eta/(r)elease/(c)andidate */
-    }
-    std::string url() {
-        return "https://github.com/r-lyeh/tracey";
-    }
-    static void runtime_checks() {
-        // if md mdd + wild pointers
-        //
-    }
-    static std::string settings( const std::string &prefix ) {
-        if( tracey::lookup(url) == "????" ) {
-            tracey::fail( "failed to decode lookups. Is debug information available?" $msvc(" Are .PDB files available?") );
-        }
-        tracey::string out;
-        out += tracey::string( "\1\2 ready" kTraceyCharLinefeed, prefix, tracey::version() );
-        out += tracey::string( "\1using \2 as realloc" kTraceyCharLinefeed, prefix, tracey::lookup(kTraceyRealloc) );
-        out += tracey::string( "\1using \2 as memset" kTraceyCharLinefeed, prefix, tracey::lookup(kTraceyMemset) );
-        out += tracey::string( "\1using \2 as printf" kTraceyCharLinefeed, prefix, tracey::lookup(kTraceyPrintf) );
-        out += tracey::string( "\1using \2 as exit" kTraceyCharLinefeed, prefix, tracey::lookup(kTraceyDie) );
-        out += tracey::string( "\1using \2 as fopen" kTraceyCharLinefeed, prefix, tracey::lookup(kTraceyfOpen) );
-        out += tracey::string( "\1using \2 as fclose" kTraceyCharLinefeed, prefix, tracey::lookup(kTraceyfClose) );
-        out += tracey::string( "\1using \2 as fprintf" kTraceyCharLinefeed, prefix, tracey::lookup(kTraceyfPrintf) );
-        out += tracey::string( "\1with C++ exceptions=\2" kTraceyCharLinefeed, prefix, $throw("enabled") $telse("disabled") );
-        out += tracey::string( "\1with kTraceyAllocsOverhead=x\2" kTraceyCharLinefeed, prefix, kTraceyAllocsOverhead );
-        out += tracey::string( "\1with kTraceyMaxStacktraces=\2 range[\3..\4]" kTraceyCharLinefeed, prefix, kTraceyMaxStacktraces, kTraceyStacktraceSkipBegin, kTraceyStacktraceSkipEnd );
-        // kTraceyCharLinefeed
-        // kTraceyCharTab
-        out += tracey::string( "\1with kTraceyReportWildPointers=\2" kTraceyCharLinefeed, prefix, kTraceyReportWildPointers ? "yes" : "no" );
-        out += tracey::string( "\1with kTraceyDefineMemoryOperators=\2" kTraceyCharLinefeed, prefix, kTraceyDefineMemoryOperators ? "yes" : "no" );
-        out += tracey::string( "\1with kTraceyMemsetAllocations=\2" kTraceyCharLinefeed, prefix, kTraceyMemsetAllocations ? "yes" : "no" );
-        out += tracey::string( "\1with kTraceyStacktraceSkipBegin=\2" kTraceyCharLinefeed, prefix, kTraceyStacktraceSkipBegin );
-        out += tracey::string( "\1with kTraceyStacktraceSkipEnd=\2" kTraceyCharLinefeed, prefix, kTraceyStacktraceSkipEnd );
-        out += tracey::string( "\1with kTraceyReportOnExit=\2" kTraceyCharLinefeed, prefix, kTraceyReportOnExit ? "yes" : "no" );
-        out += tracey::string( "\1with kTraceyWebserver=\2" kTraceyCharLinefeed, prefix, kTraceyWebserver ? "yes" : "no" );
-        out += tracey::string( "\1with kTraceyWebserverPort=\2" kTraceyCharLinefeed, prefix, kTraceyWebserverPort );
-        out += tracey::string( "\1with kTraceyHookLegacyCRT=\2" kTraceyCharLinefeed, prefix, kTraceyHookLegacyCRT );
-        out += tracey::string( "\1with kTraceyEnabled=\2" kTraceyCharLinefeed, prefix, kTraceyEnabled );
-        return out;
-    }
-    std::string settings() {
-        return tracey::settings("<tracey/tracey.cpp> says: ");
-    }
-    /*
-    // legal
-    namespace tracey { const char *const license() { return ::license; } }
-    namespace tracey { const char *const features() { return ::features; } }
-    namespace tracey { const char *const todo() { return ::todo; } }
-    namespace tracey { const char *const references() { return ::references; } }
-    namespace tracey { const char *const version() { return "tracey-v0.2.a"; } }
-    namespace tracey { const char *const url() { return "https://github.com/r-lyeh/tracey"; } }
-    */
+	if( !reason.empty() ) {
+		fail( reason );
+	}
 
-    // Extra
+	$windows(
+	FatalExit( errorcode );
+	)
 
-    bool nop() {
-        tracey::free( tracey::forget( tracey::watch( tracey::malloc( 1 ), 1 ) ) );
-        return true;
-    }
-    bool install_c_hooks() {
-        return false;
-    }
-
-    void *realloc( void *ptr, size_t resize ) {
-        static const bool init = install_c_hooks();
-
-        ptr = kTraceyRealloc( ptr, (size_t)(kTraceyAllocsOverhead * resize) );
-
-        if( !ptr && resize )
-            tracey::badalloc();
-
-        return ptr;
-    }
-    void *malloc( size_t size ) {
-        void *ptr = tracey::realloc( 0, size );
-        return kTraceyMemsetAllocations ? kTraceyMemset( ptr, 0, size ) : ptr;
-    }
-    void *calloc( size_t num, size_t size ) {
-        return tracey::malloc( num * size );
-    }
-    void *free( void *ptr ) {
-        return tracey::realloc( ptr, 0 );
-    }
-
-    void *amalloc( size_t size, size_t alignment ) {
-        std::vector<void *> invalids( 1, tracey::malloc(size) );
-        if( alignment ) {
-#          define is_aligned(POINTER, BYTE_COUNT) \
-                (((uintptr_t)(const void *)(POINTER)) % (BYTE_COUNT) == 0)
-            while( !is_aligned(invalids.back(),alignment) )
-                invalids.push_back( tracey::malloc( size ) );
-            if( invalids.size() > 1 ) {
-                std::swap( invalids.front(), invalids.back() );
-                for( unsigned i = 1; i < invalids.size(); ++i ) {
-                    tracey::free( invalids[i] );
-                }
-            }
-        }
-        return invalids[0];
-    }
+	// fallback
+	std::exit( errorcode );
 }
 
-#if kTraceyDefineMemoryOperators
-
-//* Custom memory operators (with no exceptions)
-
-void *operator new( size_t size, const std::nothrow_t &t ) throw() {
-    return tracey::watch( tracey::malloc( size ), size );
+void die( int errorcode, const std::string &reason )
+{
+	die( reason, errorcode );
 }
 
-void *operator new[]( size_t size, const std::nothrow_t &t ) throw() {
-    return tracey::watch( tracey::malloc( size ), size );
+// HEXDUMP
+// @todo: maxwidth != 80 doesnt work
+
+std::string hexdump( const void *data, size_t num_bytes, const void *self )
+{
+#   ifdef _MSC_VER
+#       pragma warning( push )
+#       pragma warning( disable : 4996 )
+#       define $vsnprintf _vsnprintf
+#   else
+#       define $vsnprintf  vsnprintf
+#   endif
+
+	struct local {
+		static std::string format( const char *fmt, ... )
+		{
+			int len;
+			std::string self;
+
+			using namespace std;
+
+			// Calculate the final length of the formatted string
+			{
+				va_list args;
+				va_start( args, fmt );
+				len = $vsnprintf( 0, 0, fmt, args );
+				va_end( args );
+			}
+
+			// Allocate a buffer (including room for null termination
+			char* target_string = new char[++len];
+
+			// Generate the formatted string
+			{
+				va_list args;
+				va_start( args, fmt );
+				$vsnprintf( target_string, len, fmt, args );
+				va_end( args );
+			}
+
+			// Assign the formatted string
+			self.assign( target_string );
+
+			// Clean up
+			delete [] target_string;
+
+			return self;
+		}
+	};
+
+	using std::max;
+	unsigned maxwidth = 80;
+	unsigned width = 16; //column width
+	unsigned width_offset_block = (8 + 1);
+	unsigned width_chars_block  = (width * 3 + 1) + sizeof("asc");
+	unsigned width_hex_block    = (width * 3 + 1) + sizeof("hex");
+	unsigned width_padding = max( 0, int( maxwidth - ( width_offset_block + width_chars_block + width_hex_block ) ) );
+	unsigned blocks = width_padding / ( width_chars_block + width_hex_block ) ;
+
+	unsigned dumpsize = ( num_bytes < width * 16 ? num_bytes : width * 16 ); //16 lines max
+
+	std::string result;
+
+	result += local::format( "%-*s %-.*s [ptr=%p sz=%d]\n", width_offset_block - 1, "offset", width_chars_block - 1, "00 01 02 03 04 05 06 07 08 09 0A 0B 0C 0D 0E 0F", self ? self : data, num_bytes );
+
+	if( !num_bytes )
+		return result;
+
+	blocks++;
+
+	const unsigned char *p = reinterpret_cast<const unsigned char *>( data );
+	size_t i = 0;
+
+	while( i < dumpsize )
+	{
+		//offset block
+		result += local::format("%p ", (size_t)(p + i) ); //%08x, %08zx
+
+		//chars blocks
+		for( unsigned b = 0; b < blocks; b++)
+		{
+			for( unsigned c = 0 ; c < width ; c++ )
+				result += local::format(" %c ", i + c >= dumpsize ? '.' : p[i + c] < 32 || p[i + c] >= 127 ? '.' : p[i + c]);
+
+			result += "asc\n";
+		}
+
+		//offset block
+		result += local::format("%p ", (size_t)(p + i) ); //%08x, %08zx
+
+		//hex blocks
+		for( unsigned b = 0; b < blocks; b++)
+		{
+			for( unsigned c = 0; c < width ; c++)
+				result += local::format( i + c < dumpsize ? "%02x " : "?? ", p[i + c]);
+
+			result += "hex\n";
+		}
+
+		//next line
+		//result += '\n';
+		i += width * blocks;
+	}
+
+	return result;
+
+#   undef $vsnprintf
+#   ifdef _MSC_VER
+#       pragma warning( pop )
+#   endif
 }
 
-void operator delete( void *ptr, const std::nothrow_t &t ) throw() {
-    tracey::free( tracey::forget( ptr ) );
+std::string timestamp() {
+	std::stringstream ss;
+	ss << __TIMESTAMP__;
+	return ss.str();
 }
 
-void operator delete[]( void *ptr, const std::nothrow_t &t ) throw() {
-    tracey::free( tracey::forget( ptr ) );
-}
+/*
+ * Simple prompt dialog (based on legolas558's code). MIT license.
+ * - rlyeh
+ */
 
-//* Custom memory operators (with exceptions)
+#if !$on($windows)
 
-void *operator new( size_t size ) throw(std::bad_alloc) {
-    return tracey::watch( tracey::malloc( size ), size );
-}
+std::string prompt( const std::string &current_value, const std::string &title, const std::string &caption )
+{
+	std::string out;
 
-void *operator new[]( size_t size ) throw(std::bad_alloc) {
-    return tracey::watch( tracey::malloc( size ), size );
-}
+	if( has("whiptail") && false )
+	{
+		std::string out = pipe( std::string() +
+			"/usr/bin/whiptail 3>&1 1>&2 2>&3 --title \"" +title+ "\" --inputbox \"" +caption+ "\" 0 0 \"" +current_value+ "\"" );
+	}
+	else
+	{
+		if( title.size() && caption.size() )
+			fprintf(stdout, "%s", title.c_str());
+		else
+			fprintf(stdout, "%s", title.empty() ? caption.c_str() : title.c_str());
 
-void operator delete( void *ptr ) throw() {
-    tracey::free( tracey::forget( ptr ) );
-}
+		if( !current_value.empty() )
+			fprintf(stdout, " (enter defaults to '%s')", current_value.c_str());
 
-void operator delete[]( void *ptr ) throw() {
-    tracey::free( tracey::forget( ptr ) );
+		fprintf(stdout, "%s", "\n");
+
+		std::getline( std::cin, out );
+
+		if( out.empty() )
+			out = current_value;
+	}
+
+	return out;
 }
 
 #endif
 
-#if kTraceyWebserver
+#if $on($msvc)
+#   pragma warning( push )
+#   pragma warning( disable : 4996 )
+#endif
 
 #if $on($windows)
+#   pragma comment(lib,"user32.lib")
+#   pragma comment(lib,"gdi32.lib")
+$warning("<heal/heal.cpp> says: dialog aware dpi fix (@todo)")
+
+std::string prompt( const std::string &current_value, const std::string &title, const std::string &caption )
+{
+	class InputBox
+	{
+		private:
+
+		HWND                hwndParent,
+							hwndInputBox,
+							hwndQuery,
+							hwndOk,
+							hwndCancel,
+							hwndEditBox;
+		LPSTR               szInputText;
+		WORD                wInputMaxLength, wInputLength;
+		bool                bRegistered,
+							bResult;
+
+		HINSTANCE           hThisInstance;
+
+		enum
+		{
+			CIB_SPAN = 10,
+			CIB_LEFT_OFFSET = 6,
+			CIB_TOP_OFFSET = 4,
+			CIB_WIDTH = 300,
+			CIB_HEIGHT = 130,
+			CIB_BTN_WIDTH = 60,
+			CIB_BTN_HEIGHT = 20
+		};
+
+		public:
+
+#       define CIB_CLASS_NAME   "CInputBoxA"
+
+		static LRESULT CALLBACK CIB_WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam)
+		{
+			InputBox *self;
+			self = (InputBox *)GetWindowLongPtr(hWnd, GWLP_USERDATA);
+
+			switch (msg)
+			{
+				case WM_CREATE:
+					self = (InputBox *) ((CREATESTRUCT *)lParam)->lpCreateParams;
+					SetWindowLongPtr(hWnd, GWLP_USERDATA, (LONG_PTR)self);
+					self->create(hWnd);
+				break;
+				case WM_COMMAND:
+					switch(LOWORD(wParam)) {
+						case IDOK:
+							self->submit();
+						case IDCANCEL:
+							self->close();
+						break;
+					}
+					break;
+				case WM_CLOSE:
+					self->close();
+					return 0;
+				case WM_DESTROY:
+					self->destroy();
+					break;
+			}
+			return(DefWindowProc (hWnd, msg, wParam, lParam));
+		}
+
+		InputBox( HINSTANCE hInst ) :
+			hwndParent(0),
+			hwndInputBox(0),
+			hwndQuery(0),
+			hwndOk(0),
+			hwndCancel(0),
+			hwndEditBox(0),
+			szInputText(0),
+			wInputMaxLength(0), wInputLength(0),
+			bRegistered(false),
+			bResult(false),
+			hThisInstance(hInst)
+		{
+			WNDCLASSEXA wndInputBox;
+			RECT rect;
+
+			memset(&wndInputBox, 0, sizeof(WNDCLASSEXA));
+
+			hThisInstance = hInst;
+
+			wndInputBox.cbSize                  = sizeof(wndInputBox);
+			wndInputBox.lpszClassName           = CIB_CLASS_NAME;
+			wndInputBox.style                   = CS_HREDRAW | CS_VREDRAW;
+			wndInputBox.lpfnWndProc             = CIB_WndProc;
+			wndInputBox.lpszMenuName            = NULL;
+			wndInputBox.hIconSm                 = NULL;
+			wndInputBox.cbClsExtra              = 0;
+			wndInputBox.cbWndExtra              = 0;
+			wndInputBox.hInstance               = hInst;
+			wndInputBox.hIcon                   = LoadIcon(NULL, IDI_WINLOGO);
+			wndInputBox.hCursor                 = LoadCursor(NULL, IDC_ARROW);
+			wndInputBox.hbrBackground           = (HBRUSH)(COLOR_WINDOW);
+
+			RegisterClassExA(&wndInputBox);
+
+			if (hwndParent)
+				GetWindowRect(hwndParent, &rect); //always false?
+			else
+				GetWindowRect(GetDesktopWindow(), &rect);
+
+			hwndInputBox = CreateWindowA( CIB_CLASS_NAME, "",
+							(WS_BORDER | WS_CAPTION), rect.left+(rect.right-rect.left-CIB_WIDTH)/2,
+							rect.top+(rect.bottom-rect.top-CIB_HEIGHT)/2,
+							CIB_WIDTH, CIB_HEIGHT, hwndParent, NULL,
+							hThisInstance, this);
+		}
+
+		void destroy()
+		{
+			EnableWindow(hwndParent, true);
+			SendMessage(hwndInputBox, WM_CLOSE/*WM_DESTROY*/, 0, 0);
+		}
+
+		~InputBox()
+		{
+			UnregisterClassA(CIB_CLASS_NAME, hThisInstance);
+		}
+
+		void submit()
+		{
+			wInputLength = (int)SendMessage(hwndEditBox, EM_LINELENGTH, 0, 0);
+			if (wInputLength) {
+				*((LPWORD)szInputText) = wInputMaxLength;
+				wInputLength = (WORD)SendMessage(hwndEditBox, EM_GETLINE, 0, (LPARAM)szInputText);
+			}
+			szInputText[wInputLength] = '\0';
+			bResult = true;
+		}
+
+		void create(HWND hwndNew)
+		{
+			static HFONT myFont = NULL;
+
+			if( myFont != NULL )
+			{
+				DeleteObject( myFont );
+				myFont = NULL;
+			}
+
+			hwndInputBox = hwndNew;
+
+			NONCLIENTMETRICS ncm;
+			ncm.cbSize = sizeof(NONCLIENTMETRICS);
+
+			if (SystemParametersInfo(SPI_GETNONCLIENTMETRICS, sizeof(NONCLIENTMETRICS), &ncm, 0))
+			{
+#if 0
+				LOGFONT lf;
+				memset(&lf,0,sizeof(LOGFONT));
+
+				lf.lfWeight= FW_NORMAL;
+				lf.lfCharSet= ANSI_CHARSET;
+				//lf.lfPitchAndFamily = 35;
+				lf.lfHeight= 10;
+				strcpy(lf.lfFaceName, "Tahoma");
+				myFont=CreateFontIndirect(&lf);
+#else
+				myFont = CreateFontIndirect(&ncm.lfMessageFont);
+#endif
+			}
+			else
+			{
+				myFont = (HFONT)GetStockObject(DEFAULT_GUI_FONT);
+			}
+
+			//  SetWindowPos(hwndInputBox, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
+			hwndQuery = CreateWindowA("Static", "", WS_CHILD | WS_VISIBLE,
+									CIB_LEFT_OFFSET, CIB_TOP_OFFSET,
+									CIB_WIDTH-CIB_LEFT_OFFSET*2, CIB_BTN_HEIGHT*2,
+									hwndInputBox, NULL,
+									hThisInstance, NULL);
+			hwndEditBox = CreateWindowA("Edit", "", WS_CHILD | WS_VISIBLE | WS_BORDER | ES_AUTOHSCROLL | ES_LEFT, CIB_LEFT_OFFSET,
+									CIB_TOP_OFFSET + CIB_BTN_HEIGHT*2, CIB_WIDTH-CIB_LEFT_OFFSET*3, CIB_BTN_HEIGHT,
+									hwndInputBox,   NULL,
+									hThisInstance, NULL);
+			hwndOk = CreateWindowA("Button", "OK", WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_PUSHBUTTON,
+									CIB_WIDTH/2 - CIB_SPAN*2 - CIB_BTN_WIDTH, CIB_HEIGHT - CIB_TOP_OFFSET*4 - CIB_BTN_HEIGHT*2,
+									CIB_BTN_WIDTH, CIB_BTN_HEIGHT, hwndInputBox, (HMENU)IDOK,
+									hThisInstance, NULL);
+			hwndCancel = CreateWindowA("Button", "Cancel",
+									WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_PUSHBUTTON,
+									CIB_WIDTH/2 + CIB_SPAN, CIB_HEIGHT - CIB_TOP_OFFSET*4 - CIB_BTN_HEIGHT*2,  CIB_BTN_WIDTH, CIB_BTN_HEIGHT,
+									hwndInputBox, (HMENU)IDCANCEL,
+									hThisInstance, NULL);
+
+		//  SendMessage(hwndInputBox,WM_SETFONT,(WPARAM)myFont,FALSE);
+			SendMessage(hwndQuery,WM_SETFONT,(WPARAM)myFont,FALSE);
+			SendMessage(hwndEditBox,WM_SETFONT,(WPARAM)myFont,FALSE);
+			SendMessage(hwndOk,WM_SETFONT,(WPARAM)myFont,FALSE);
+			SendMessage(hwndCancel,WM_SETFONT,(WPARAM)myFont,FALSE);
+		}
+
+		void close()
+		{
+			PostMessage(hwndInputBox, WM_CLOSE, 0, 0);
+		}
+
+		void hide()
+		{
+			ShowWindow(hwndInputBox, SW_HIDE);
+		}
+
+		void show(LPCSTR lpszTitle, LPCSTR  lpszQuery)
+		{
+			SetWindowTextA(hwndInputBox, lpszTitle);
+			SetWindowTextA(hwndEditBox, szInputText);
+			SetWindowTextA(hwndQuery, lpszQuery);
+			SendMessage(hwndEditBox, EM_LIMITTEXT, wInputMaxLength, 0);
+			SendMessage(hwndEditBox, EM_SETSEL, 0, -1);
+			SetFocus(hwndEditBox);
+			ShowWindow(hwndInputBox, SW_NORMAL);
+		}
+
+		int show(HWND hwndParentWindow, LPCSTR lpszTitle, LPCSTR lpszQuery, LPSTR szResult, WORD wMax)
+		{
+			MSG msg;
+			BOOL    bRet;
+			hwndParent = hwndParentWindow;
+			szInputText = szResult;
+			wInputMaxLength = wMax;
+
+			bResult = false;
+
+		//  EnableWindow(hwndParent, false);
+
+			show(lpszTitle, lpszQuery);
+
+			while( (bRet = GetMessageA( &msg, NULL, 0, 0 )) != 0)
+			{
+				if (msg.message==WM_KEYDOWN) {
+					switch (msg.wParam) {
+					case VK_RETURN:
+						submit();
+					case VK_ESCAPE:
+						close();
+						break;
+					default:
+						TranslateMessage(&msg);
+						break;
+					}
+				} else
+		//      if (!IsDialogMessage(hwndInputBox, &msg)) {
+					TranslateMessage(&msg);
+		//      }
+				DispatchMessage(&msg);
+				if (msg.message == WM_CLOSE)
+					break;
+			}
+
+		//  EnableWindow(hwndParent, true);
+
+			return bResult;
+		}
+
+	#   undef CIB_CLASS_NAME
+	}
+	myinp(GetModuleHandle(0));
+
+	char *result = new char [2048+1];
+
+	memset( result, 0, 2048+1 ); //default value
+
+	strcpy( result, current_value.c_str() );
+
+	myinp.show(0, "L", caption.size() ? caption.c_str() : title.c_str(), result, 2048);
+
+	std::string _r = result;
+
+	delete [] result;
+
+	return _r;
+}
+
+#endif
+
+}
+
+#if $on($msvc)
+#   pragma warning( pop )
+#endif
+
+/*
+#undef $debug
+#undef $release
+#undef $other
+#undef $gnuc
+#undef $msvc
+
+#undef $undefined
+#undef $apple
+#undef $linux
+#undef $windows
+
+#undef $no
+#undef $yes
+*/
+
+#undef $check
+
+
+// }
+
+// mutexes and threads
+#if $on($cpp11)
+#include <mutex>
+#include <thread>
+#else
+#include <boost/thread/recursive_mutex.hpp>
+#include <boost/thread/thread.hpp>
+namespace std {
+	using boost::thread;
+	using boost::recursive_mutex;
+}
+#endif
+
+// external; route66 uses c++11
+#if $on($cpp11)
+
+//#line 1 "route66.cpp"
+// lightweight http server
+// - rlyeh, mit licensed. based on code by Ivan Tikhonov (zlib licensed)
+
+// @todo : arguments
+
+#include <thread>
+#include <functional>
+#include <string>
+#include <map>
+#include <sstream>
+
+
+//#line 1 "route66.hpp"
+// lightweight http server
+// - rlyeh, mit licensed. based on code by Ivan Tikhonov (zlib licensed)
+
+/* to highlight API, remove this asterisk in a syntax highlighted editor --> */
+
+//#pragma once
+
+#include <functional>
+#include <vector>
+#include <string>
+#include <utility>
+#include <ostream>
+
+namespace route66 {
+
+	/*/ request: class
+	/*/
+	struct request {
+		/*/ url: raw request ('/search?req1=blabla&req2=whatever')
+		/*/ std::string url;
+		/*/ path: raw path url ('/search')
+		/*/ std::string path;
+		/*/ options: raw options url ('?req1=blabla&req2=whatever')
+		/*/ std::string options;
+		/*/ arguments: decoupled options as arguments ([0]={'req1','blabla'}, [1]={'req2','whatever'})
+		/*/ std::vector<std::pair<std::string, std::string>> arguments;
+	};
+
+	/*/ callback: alias
+	/*/ using callback = std::function<int(request&,std::ostream&,std::ostream &)>;
+
+	/*/ create(): start a daemon at given port and route path, callback will be invoked; returns false if failed.
+	/*/ bool create( unsigned port, const std::string &path, const route66::callback &callback );
+
+	/*/ mime: types
+	/*/
+	struct mime {
+		/*/ html(): mime type that is equal to "Content-Type: text/html; charset=utf-8\r\n"
+		/*/ static std::string html();
+		/*/ text(): mime type that is equal to "Content-Type: text/plain; charset=utf-8\r\n"
+		/*/ static std::string text();
+		/*/ json(): mime type that is equal to "Content-Type: application/json; charset=utf-8\r\n"
+		/*/ static std::string json();
+	};
+
+	/*/ httpcode: listing of HTTP result codes
+	/*/
+	struct httpcode {
+		unsigned code;
+		const char *const description;
+	};
+
+	/*/ 0XX route66
+	/*/ httpcode SHUTDOWN();
+	/*/ 1XX informational
+	/*/ httpcode CONTINUE(); /*/
+	/*/ httpcode SWITCH_PROTOCOLS();
+	/*/ 2XX success
+	/*/ httpcode OK(); /*/
+	/*/ httpcode CREATED(); /*/
+	/*/ httpcode ACCEPTED(); /*/
+	/*/ httpcode PARTIAL(); /*/
+	/*/ httpcode NO_CONTENT(); /*/
+	/*/ httpcode RESET_CONTENT(); /*/
+	/*/ httpcode PARTIAL_CONTENT(); /*/
+	/*/ httpcode WEBDAV_MULTI_STATUS();
+	/*/ 3XX redirection
+	/*/ httpcode AMBIGUOUS(); /*/
+	/*/ httpcode MOVED(); /*/
+	/*/ httpcode REDIRECT(); /*/
+	/*/ httpcode REDIRECT_METHOD(); /*/
+	/*/ httpcode NOT_MODIFIED(); /*/
+	/*/ httpcode USE_PROXY(); /*/
+	/*/ httpcode REDIRECT_KEEP_VERB();
+	/*/ 4XX client's fault
+	/*/ httpcode BAD_REQUEST(); /*/
+	/*/ httpcode DENIED(); /*/
+	/*/ httpcode PAYMENT_REQ(); /*/
+	/*/ httpcode FORBIDDEN(); /*/
+	/*/ httpcode NOT_FOUND(); /*/
+	/*/ httpcode BAD_METHOD(); /*/
+	/*/ httpcode NONE_ACCEPTABLE(); /*/
+	/*/ httpcode PROXY_AUTH_REQ(); /*/
+	/*/ httpcode REQUEST_TIMEOUT(); /*/
+	/*/ httpcode CONFLICT(); /*/
+	/*/ httpcode GONE(); /*/
+	/*/ httpcode LENGTH_REQUIRED(); /*/
+	/*/ httpcode PRECOND_FAILED(); /*/
+	/*/ httpcode REQUEST_TOO_LARGE(); /*/
+	/*/ httpcode URI_TOO_LONG(); /*/
+	/*/ httpcode UNSUPPORTED_MEDIA(); /*/
+	/*/ httpcode RETRY_WITH();
+	/*/ 5XX server's fault
+	/*/ httpcode SERVER_ERROR(); /*/
+	/*/ httpcode NOT_SUPPORTED(); /*/
+	/*/ httpcode BAD_GATEWAY(); /*/
+	/*/ httpcode SERVICE_UNAVAIL(); /*/
+	/*/ httpcode GATEWAY_TIMEOUT(); /*/
+	/*/ httpcode VERSION_NOT_SUP();
+}
+
+// Sockets
+
+#if defined(_WIN32)
 
 #   include <winsock2.h>
 #   include <ws2tcpip.h>
@@ -1734,35 +2355,35 @@ void operator delete[]( void *ptr ) throw() {
 #   define SHUTDOWN_R(A)             ::shutdown((A),0)
 #   define SHUTDOWN_W(A)             ::shutdown((A),1)
 
-    namespace
-    {
-        // fill missing api
+	namespace
+	{
+		// fill missing api
 
-        enum
-        {
-            F_GETFL = 0,
-            F_SETFL = 1,
+		enum
+		{
+			F_GETFL = 0,
+			F_SETFL = 1,
 
-            O_NONBLOCK = 128 // dummy
-        };
+			O_NONBLOCK = 128 // dummy
+		};
 
-        int fcntl( int &sockfd, int mode, int value )
-        {
-            if( mode == F_GETFL ) // get socket status flags
-                return 0; // original return current sockfd flags
+		int fcntl( int &sockfd, int mode, int value )
+		{
+			if( mode == F_GETFL ) // get socket status flags
+				return 0; // original return current sockfd flags
 
-            if( mode == F_SETFL ) // set socket status flags
-            {
-                u_long iMode = ( value & O_NONBLOCK ? 0 : 1 );
+			if( mode == F_SETFL ) // set socket status flags
+			{
+				u_long iMode = ( value & O_NONBLOCK ? 0 : 1 );
 
-                bool result = ( ioctlsocket( sockfd, FIONBIO, &iMode ) == NO_ERROR );
+				bool result = ( ioctlsocket( sockfd, FIONBIO, &iMode ) == NO_ERROR );
 
-                return 0;
-            }
+				return 0;
+			}
 
-            return 0;
-        }
-    }
+			return 0;
+		}
+	}
 
 #else
 
@@ -1795,7 +2416,925 @@ void operator delete[]( void *ptr ) throw() {
 
 #endif
 
+namespace route66 {
+
+std::string mime::html() { return "Content-Type: text/html; charset=utf-8\r\n"; }
+std::string mime::text() { return "Content-Type: text/plain; charset=utf-8\r\n"; }
+std::string mime::json() { return "Content-Type: application/json; charset=utf-8\r\n"; }
+
+struct daemon {
+	const int socket;
+	const std::map< std::string /*path*/, route66::callback /*fn*/ > *routers;
+
+	void operator()() {
+		bool shutdown = false;
+		while( !shutdown ) {
+			int child = ACCEPT(socket,0,0), o = 0, h[2], hi = 0;
+			if( child < 0 ) continue;
+			char b[1024];
+			while(hi<2&&o<1024) {
+				int n = READ(child,b+o,sizeof(b)-o);
+				if(n<=0) { break; }
+				else {
+					int i = o;
+					o+=n;
+					for(;i<n&&hi<2;i++) {
+					if((hi < 2) && b[i] == ' ') { h[hi++] = i; }
+					}
+				}
+			}
+			if(hi == 2) {
+				b[ o ] = '\0';
+
+				char org = b[h[1]];
+				b[h[1]] = '\0';
+				/*
+				std::cout << h[0] << std::endl;
+				std::cout << h[1] << std::endl;
+				*/
+				std::string url( &b[h[0]+1] ); //skip "GET "
+				b[h[1]] = org;
+
+				std::string path, options;
+
+				auto mark = url.find_first_of('?');
+				if( mark == std::string::npos ) {
+					path = url;
+				} else {
+					path = url.substr( 0, mark );
+					options = url.substr( mark );
+				}
+				/*
+				std::cout << "url: " << url << std::endl;
+				std::cout << "path: " << path << std::endl;
+				std::cout << "options: " << options << std::endl;
+				*/
+				auto found = routers->find( path );
+				if( found == routers->end() ) {
+					// bad route, try index fallback
+					found = routers->find("/");
+				}
+
+				if( found != routers->end() ) {
+					route66::request rq;
+					rq.url = url;
+					rq.path = path;
+					rq.options = options;
+					// @todo : arguments
+
+					auto &fn = found->second;
+					std::stringstream headers, contents;
+					int httpcode = fn( rq, headers, contents );
+
+					std::string datas = contents.str();
+					shutdown = ( 0 == httpcode ? true : false );
+
+					if( !shutdown && datas.size() ) {
+						std::string head1 = std::string("HTTP/1.1 ") + std::to_string(httpcode) + " OK\r\n";
+						std::string head2 = headers.str() +
+							"Content-Length: " + std::to_string( datas.size() ) + "\r\n"
+							"\r\n";
+
+						WRITE( child, head1.c_str(), head1.size() );
+						WRITE( child, head2.c_str(), head2.size() );
+						WRITE( child, datas.c_str(), datas.size() );
+					}
+				}
+
+				SHUTDOWN(child);
+				CLOSE(child);
+			}
+		}
+	}
+};
+
+bool create( unsigned port, const std::string &path, const route66::callback &fn ) {
+	using routers = std::map< std::string /*path*/, route66::callback /*fn */>;
+	static std::map< unsigned, routers > daemons;
+
+	if( daemons.find(port) == daemons.end() ) {
+		INIT();
+		int socket = SOCKET(PF_INET, SOCK_STREAM, IPPROTO_IP);
+		if( socket < 0 ) {
+			return "cannot init socket", false;
+		}
+
+		struct sockaddr_in l;
+		memset( &l, 0, sizeof(sockaddr_in) );
+		l.sin_family = AF_INET;
+		l.sin_port = htons(port);
+		l.sin_addr.s_addr = INADDR_ANY;
+	#if !defined(_WIN32)
+		int r = 1; setsockopt(socket,SOL_SOCKET,SO_REUSEADDR,&r,sizeof(r));
+	#endif
+		BIND(socket,(struct sockaddr *)&l,sizeof(l));
+		LISTEN(socket,5);
+
+		std::thread( route66::daemon{ socket, &daemons[ port ] } ).detach();
+	}
+
+	daemons[ port ][ path ] = fn;
+	return "ok", true;
+}
+
+#undef SHUTDOWN
+
+/*/ 1XX informational
+/*/ httpcode SHUTDOWN(){ return httpcode { 0, "Shutdown requested" }; }
+/*/ 1XX informational
+/*/ httpcode CONTINUE(){ return httpcode { 100, "The request can be continued." }; } /*/
+/*/ httpcode SWITCH_PROTOCOLS(){ return httpcode { 101, "The server has switched protocols in an upgrade header." }; }
+/*/ 2XX success
+/*/ httpcode OK(){ return httpcode { 200, "The request completed successfully." }; } /*/
+/*/ httpcode CREATED(){ return httpcode { 201, "The request has been fulfilled and resulted in the creation of a new resource." }; } /*/
+/*/ httpcode ACCEPTED(){ return httpcode { 202, "The request has been accepted for processing, but the processing has not been completed." }; } /*/
+/*/ httpcode PARTIAL(){ return httpcode { 203, "The returned meta information in the entity-header is not the definitive set available from the originating server." }; } /*/
+/*/ httpcode NO_CONTENT(){ return httpcode { 204, "The server has fulfilled the request, but there is no new information to send back." }; } /*/
+/*/ httpcode RESET_CONTENT(){ return httpcode { 205, "The request has been completed, and the client program should reset the document view that caused the request to be sent to allow the user to easily initiate another input action." }; } /*/
+/*/ httpcode PARTIAL_CONTENT(){ return httpcode { 206, "The server has fulfilled the partial GET request for the resource." }; } /*/
+/*/ httpcode WEBDAV_MULTI_STATUS(){ return httpcode { 207, "During a World Wide Web Distributed Authoring and Versioning (WebDAV) operation, this indicates multiple status httpcodes for a single response. The response body contains Extensible Markup Language (XML) that describes the status httpcodes. For more information, see HTTP Extensions for Distributed Authoring." }; }
+/*/ 3XX redirection
+/*/ httpcode AMBIGUOUS(){ return httpcode { 300, "The requested resource is available at one or more locations." }; } /*/
+/*/ httpcode MOVED(){ return httpcode { 301, "The requested resource has been assigned to a new permanent Uniform Resource Identifier (URI), and any future references to this resource should be done using one of the returned URIs." }; } /*/
+/*/ httpcode REDIRECT(){ return httpcode { 302, "The requested resource resides temporarily under a different URI." }; } /*/
+/*/ httpcode REDIRECT_METHOD(){ return httpcode { 303, "The response to the request can be found under a different URI and should be retrieved using a GET HTTP verb on that resource." }; } /*/
+/*/ httpcode NOT_MODIFIED(){ return httpcode { 304, "The requested resource has not been modified." }; } /*/
+/*/ httpcode USE_PROXY(){ return httpcode { 305, "The requested resource must be accessed through the proxy given by the location field." }; } /*/
+/*/ httpcode REDIRECT_KEEP_VERB(){ return httpcode { 307, "The redirected request keeps the same HTTP verb. HTTP/1.1 behavior." }; }
+/*/ 4XX client's fault
+/*/ httpcode BAD_REQUEST(){ return httpcode { 400, "The request could not be processed by the server due to invalid syntax." }; } /*/
+/*/ httpcode DENIED(){ return httpcode { 401, "The requested resource requires user authentication." }; } /*/
+/*/ httpcode PAYMENT_REQ(){ return httpcode { 402, "Not implemented in the HTTP protocol." }; } /*/
+/*/ httpcode FORBIDDEN(){ return httpcode { 403, "The server understood the request, but cannot fulfill it." }; } /*/
+/*/ httpcode NOT_FOUND(){ return httpcode { 404, "The server has not found anything that matches the requested URI." }; } /*/
+/*/ httpcode BAD_METHOD(){ return httpcode { 405, "The HTTP verb used is not allowed." }; } /*/
+/*/ httpcode NONE_ACCEPTABLE(){ return httpcode { 406, "No responses acceptable to the client were found." }; } /*/
+/*/ httpcode PROXY_AUTH_REQ(){ return httpcode { 407, "Proxy authentication required." }; } /*/
+/*/ httpcode REQUEST_TIMEOUT(){ return httpcode { 408, "The server timed out waiting for the request." }; } /*/
+/*/ httpcode CONFLICT(){ return httpcode { 409, "The request could not be completed due to a conflict with the current state of the resource. The user should resubmit with more information." }; } /*/
+/*/ httpcode GONE(){ return httpcode { 410, "The requested resource is no longer available at the server, and no forwarding address is known." }; } /*/
+/*/ httpcode LENGTH_REQUIRED(){ return httpcode { 411, "The server cannot accept the request without a defined content length." }; } /*/
+/*/ httpcode PRECOND_FAILED(){ return httpcode { 412, "The precondition given in one or more of the request header fields evaluated to false when it was tested on the server." }; } /*/
+/*/ httpcode REQUEST_TOO_LARGE(){ return httpcode { 413, "The server cannot process the request because the request entity is larger than the server is able to process." }; } /*/
+/*/ httpcode URI_TOO_LONG(){ return httpcode { 414, "The server cannot service the request because the request URI is longer than the server can interpret." }; } /*/
+/*/ httpcode UNSUPPORTED_MEDIA(){ return httpcode { 415, "The server cannot service the request because the entity of the request is in a format not supported by the requested resource for the requested method." }; } /*/
+/*/ httpcode RETRY_WITH(){ return httpcode { 449, "The request should be retried after doing the appropriate action." }; }
+/*/ 5XX server's fault
+/*/ httpcode SERVER_ERROR(){ return httpcode { 500, "The server encountered an unexpected condition that prevented it from fulfilling the request." }; } /*/
+/*/ httpcode NOT_SUPPORTED(){ return httpcode { 501, "The server does not support the functionality required to fulfill the request." }; } /*/
+/*/ httpcode BAD_GATEWAY(){ return httpcode { 502, "The server, while acting as a gateway or proxy, received an invalid response from the upstream server it accessed in attempting to fulfill the request." }; } /*/
+/*/ httpcode SERVICE_UNAVAIL(){ return httpcode { 503, "The service is temporarily overloaded." }; } /*/
+/*/ httpcode GATEWAY_TIMEOUT(){ return httpcode { 504, "The request was timed out waiting for a gateway." }; } /*/
+/*/ httpcode VERSION_NOT_SUP(){ return httpcode { 505, "The server does not support the HTTP protocol version that was used in the request message." }; }
+
+}
+
+
+#else
+	$warning( "<tracey/tracey.cpp> says: kTraceyWebserverPort disabled.")
+#   undef  kTraceyWebserverPort
+#   define kTraceyWebserverPort 0
+#endif
+
+// checks: todo
+// if /MD or /MDd and kTraceyReportWildPointers warn user "not a good idea"
+#if kTraceyHookLegacyCRT
+	$warning( "<tracey/tracey.cpp> says: kTraceyHookLegacyCRT option ignored. CRT hooking not supported on this platform.")
+#   undef  kTraceyHookLegacyCRT
+#   define kTraceyHookLegacyCRT 0
+#endif
+
+namespace tracey
+{
+	static void webmain( void * );
+	static void hotkeymain( void * );
+
+	typedef heal::sfstring string;
+	typedef heal::sfstrings strings;
+
+	std::string human( size_t bytes ) {
+		/**/ if( bytes >= 1024 * 1024 * 1024 ) return tracey::string("\1 GB", bytes / (1024 * 1024 * 1024));
+		else if( bytes >=   16 * 1024 * 1024 ) return tracey::string("\1 MB", bytes / (       1024 * 1024));
+		else if( bytes >=          16 * 1024 ) return tracey::string("\1 KB", bytes / (              1024));
+		else                                   return tracey::string("\1 bytes", bytes );
+	}
+
+	struct branch {
+		size_t hits;
+		size_t size;
+		branch() : hits(0), size(0) {
+		}
+		branch( const branch &other ) {
+			operator=( other );
+		}
+		branch &operator =( const branch &other ) {
+			if( this != &other ) {
+				hits = other.hits;
+				size = other.size;
+			}
+			return *this;
+		}
+		branch &operator +=( const branch &other ) {
+			this->size += /*(other.hits ? other.hits : 1) **/ other.size;
+			return *this;
+		}
+		bool operator<( const double t ) const {
+			return size < t;
+		}
+
+		std::string str( double total ) const {
+			tracey::string os;
+			int pct = int((size * 100.0) / total);
+			/**/ if( pct >= 100 ) os << tracey::string(   "\1%", pct ) << " .. " << tracey::human( size );
+			else if( pct >=  10 ) os << tracey::string(  "0\1%", pct ) << " .. " << tracey::human( size );
+			else                  os << tracey::string( "00\1%", pct ) << " .. " << tracey::human( size );
+
+			if( hits > 1 ) os << " ; " << hits << " hits";
+			return os;
+		}
+	};
+}
+
 namespace tracey {
+
+	//#include <map>
+	//#include <iostream>
+
+	// tree class
+	// [] is read-only
+	// () is read-writeable (so is <<)
+	typedef void *K;
+	typedef branch V;
+	typedef oak::tree<K,V> tree;
+
+	// for tree walking
+	struct chopper {
+		bool operator()( tracey::tree &tree, tracey::tree::iterator &it ) const {
+			if( it->second.get() < kTraceyTruncateBranchesSmallerThan ) {
+				tree.erase( it->first );
+				return false;
+			} else {
+				return true;
+			}
+		}
+	};
+
+	template<typename U>
+	std::string print( const tree &self, double total, const tracey::string &fmt1234, const tracey::string &sorted_by, bool reversed, const std::map<K,U> &tmap, unsigned depth ) {
+		std::map<std::string,tracey::strings> list;
+		std::string tabs( depth, kTraceyCharTab[0] );
+		if( !tmap.empty() ) {
+			for( tree::const_iterator it = self.begin(), end = self.end(); it != end; ++it  ) {
+				tracey::string key( sorted_by, tmap.find( it->first )->second, it->second.get().str(total), tabs, self.size() );
+				tracey::string value( fmt1234, tmap.find( it->first )->second, it->second.get().str(total), tabs, self.size() );
+				list[ key ].push_back( value );
+				list[ key ].push_back( print( it->second, total, fmt1234, sorted_by, reversed, tmap, depth + 1 ) );
+			}
+		} else {
+			for( tree::const_iterator it = self.begin(), end = self.end(); it != end; ++it  ) {
+				tracey::string key( sorted_by, it->first, it->second.get().str(total), tabs, self.size() );
+				tracey::string value( fmt1234, it->first, it->second.get().str(total), tabs, self.size() );
+				list[ key ].push_back( value );
+				list[ key ].push_back( print( it->second, total, fmt1234, sorted_by, reversed, tmap, depth + 1 ) );
+			}
+		}
+		std::string out;
+		if( !reversed ) {
+			for( std::map<std::string,tracey::strings>::const_iterator it = list.begin(), end = list.end(); it != end; ++it ) {
+				out += it->second.flat();
+			}
+		} else {
+			for( std::map<std::string,tracey::strings>::const_reverse_iterator it = list.rbegin(), end = list.rend(); it != end; ++it ) {
+				out += it->second.flat();
+			}
+		}
+		return out;
+	}
+
+	template<typename U>
+	std::string print( const tree &self, double total, const std::map<K,U> &tmap, const tracey::string &format = "{tabs}[{size}] {key} ({value})\n", const tracey::string &sorted_by = "{key}", bool reversed = false ) {
+		tracey::string fmt = format
+		.replace("{key}",   "\1")
+		.replace("{value}", "\2")
+		.replace("{tabs}",  "\3")
+		.replace("{size}",  "\4");
+		tracey::string sort = sorted_by
+		.replace("{key}",   "\1")
+		.replace("{value}", "\2")
+		.replace("{tabs}",  "\3")
+		.replace("{size}",  "\4");
+		return print( self, total, fmt, sort, reversed, tmap, 0 );
+	}
+
+	std::string print( const tree &self, double total, const tracey::string &format = "{tabs}[{size}] {key} ({value})\n", const tracey::string &sorted_by = "{key}", bool reversed = false ) {
+		std::map<K, K> dummy;
+		return print( self, total, dummy, format, sorted_by, reversed );
+	}
+
+	// callstack, demangle, lookup
+	using namespace heal;
+}
+
+namespace tracey
+{
+	namespace
+	{
+		volatile size_t timestamp_id = 0;
+		struct stats_t {
+			size_t usage, usage_peak, num_leaks, leak_peak, overhead;
+			stats_t() : usage(0), usage_peak(0), num_leaks(0), leak_peak(0), overhead(0) {}
+			std::string str() const {
+				return tracey::string("highest peak: \1 total, \2 greatest peak // \3 allocs in use: \4 + overhead: \5 = total: \6",
+									human(usage_peak), human(leak_peak), num_leaks, human(usage), human(overhead), human( usage + overhead ) );
+			}
+		} stats;
+
+		size_t create_id() {
+			static size_t id = 0;
+			return ++id;
+		}
+
+		bool view_report( const std::string &html ) {
+			$windows( return std::system( tracey::string("start \1", html).c_str() ), true );
+			$apple( return std::system( tracey::string("open \1", html).c_str() ), true );
+			$linux( return std::system( tracey::string("xdg-open \1", html).c_str() ), true );
+			return false;
+		}
+
+		std::string get_temp_pathfile() {
+			$windows(
+				std::string path = std::string( std::getenv("TEMP") ? std::getenv("TEMP") : "." ) + std::tmpnam(0);
+				while( path.size() && path.at( path.size() - 1 ) == '.' ) path.resize( path.size() - 1 );
+				return path;
+			)
+			$welse(
+				return std::string() + std::tmpnam(0);
+			)
+		}
+	}
+
+	namespace detail
+	{
+		struct leak {
+			size_t id, size;
+			const void *addr;
+			tracey::callstack cs;
+
+			leak() : size(0), id(0), addr(0)
+			{}
+
+			void wipe() {
+				id = create_id();
+				cs = tracey::callstack();
+				size = 0;
+				addr = 0;
+			}
+
+			~leak() {
+				wipe();
+			}
+		};
+	}
+
+	namespace
+	{
+		using namespace tracey::detail;
+
+		typedef std::vector< const leak * > leaks;
+
+		// recursive mutex
+		std::recursive_mutex *mutex = 0;
+
+		// hard on/off switch
+		static const    bool kTraceyEnabledHard = kTraceyEnabled;
+		// soft on/off switch
+		static volatile bool kTraceyEnabledSoft = true;
+
+		class container : public std::map< const void *, leak, std::less< const void * > > //, tracey::malloc_allocator< std::pair< const void *, leak * > > >
+		{
+			public:
+
+			container()
+			{
+				 mutex = new std::recursive_mutex();
+			}
+
+			~container() {
+				mutex = 0;
+
+				if( kTraceyReportOnExit && kTraceyEnabledSoft ) {
+					view_report( _report() );
+				}
+
+				// We should clear the memory involved in all allocations but after all, we are a memory tracker and we should be the very
+				// last thing to deallocate in any program. So we don't do it and we save some time for developing when exiting the app.
+				// Silent & quick exit. Not a requirement in all architectures but who knows.
+				kTraceyDie( __LINE__ );
+			}
+
+			void _clear() {
+
+				for( iterator it = this->begin(), end = this->end(); it != end; ++it ) {
+					it->second.wipe();
+				}
+
+				this->clear();
+			}
+
+			leaks collect_leaks( size_t *wasted ) const {
+				leaks list;
+				*wasted = 0;
+				for( const_iterator it = this->begin(), end = this->end(); it != end; ++it ) {
+					const tracey::detail::leak &L = it->second;
+					if( L.addr && L.size && L.id >= timestamp_id ) {
+						*wasted += L.size;
+						list.push_back( &L );
+					}
+				}
+				return list;
+			}
+
+			std::string _report() const {
+
+				std::string logfile = get_temp_pathfile() + "xxx-tracey.html";
+
+				kTraceyPrintf( "%s", tracey::string( "<tracey/tracey.cpp> says: summary: \1" kTraceyCharLinefeed, stats.str() ).c_str() );
+				kTraceyPrintf( "%s", tracey::string( "<tracey/tracey.cpp> says: creating report: \1" kTraceyCharLinefeed, logfile).c_str() );
+				kTraceyfFile *fp = kTraceyfOpen( logfile.c_str(), "wb" );
+
+				// this code often runs at the very end of a program cycle (even when static memory has been deallocated)
+				// so, avoid using global C++ objects like std::cout/cerr as much as possible; otherwise crashes may happen
+
+				$windows(
+					AllocConsole();
+				)
+
+				// Find leaks
+				kTraceyPrintf( "%s", tracey::string("<tracey/tracey.cpp> says: filtering leaks..." kTraceyCharLinefeed).c_str() );
+				size_t wasted, n_leak;
+				leaks filtered = collect_leaks( &wasted );
+				n_leak = filtered.size();
+				kTraceyPrintf( "%s", tracey::string("<tracey/tracey.cpp> says: found \1 leaks wasting \2" kTraceyCharLinefeed, n_leak, human(wasted)).c_str() );
+
+				// Calc score
+				double leaks_pct = this->size() ? n_leak * 100.0 / this->size() : 0.0;
+				std::string score = "perfect!";
+				if( leaks_pct >  0.00 ) score = "excellent";
+				if( leaks_pct >  1.25 ) score = "good";
+				if( leaks_pct >  2.50 ) score = "poor";
+				if( leaks_pct >  5.00 ) score = "mediocre";
+				if (leaks_pct > 10.00 ) score = "lame";
+
+				// Header
+				kTraceyfPrintf( fp, "%s", tracey::string( "<html><body><xmp>" ).c_str() );
+				kTraceyfPrintf( fp, "%s", tracey::string( "<tracey/tracey.cpp> says: generated with \1 (\2)" kTraceyCharLinefeed, tracey::version(), tracey::url() ).c_str() );
+				if( tracey::lookup(url) == "????" )
+				kTraceyfPrintf( fp, "%s", tracey::string( "<tracey/tracey.cpp> says: failed to decode symbols!! Is debug information available?" $msvc(" Are .PDB files available?") kTraceyCharLinefeed ).c_str() );
+				kTraceyfPrintf( fp, "%s", tracey::string( "<tracey/tracey.cpp> says: best viewed on foldable text editor (like SublimeText2) with tabs=2sp and no word-wrap" kTraceyCharLinefeed ).c_str() );
+				kTraceyfPrintf( fp, "%s", tracey::string( "<tracey/tracey.cpp> says: \1, \2 leaks found; \3 wasted ('\4' score)" kTraceyCharLinefeed, !n_leak ? "ok" : "error", n_leak, human(wasted), score ).c_str() );
+				kTraceyfPrintf( fp, "%s", tracey::string( "<tracey/tracey.cpp> says: summary: \1" kTraceyCharLinefeed, stats.str() ).c_str() );
+				kTraceyfPrintf( fp, "%s", tracey::string( "<tracey/tracey.cpp> says: report filename: \1" kTraceyCharLinefeed, logfile).c_str() );
+
+				// Body
+				// Get all frame addresses involved in all leaks
+				// Also, create a tree of frames; so we will take decisions from above by examining node weights (@todo)
+				kTraceyPrintf( "%s", tracey::string("<tracey/tracey.cpp> says: creating trees of frames..."  kTraceyCharLinefeed).c_str() );
+				std::set< void * > set;
+				tracey::tree tree;
+				tree[ (void *)((~0)-0) ]; // bottom-top branch
+				tree[ (void *)((~0)-1) ]; // top-bottom branch
+				for( leaks::const_iterator it = filtered.begin(), end = filtered.end(); it != end; ++it ) {
+					const leak &L = **it;
+					const tracey::callstack &callstack = L.cs;
+					tracey::tree *_tree = &tree[(void *)((~0)-0)];
+					tracey::tree *_tree_inv = &tree[(void *)((~0)-1)];
+					if( !callstack.frames.size() ) continue;
+
+					for( unsigned i = 0, start = kTraceyStacktraceSkipBegin, end = callstack.frames.size() - 1 - kTraceyStacktraceSkipEnd; start+i <= end; ++i ) {
+
+						double size;
+						size = (start+i == end ? L.size : 0);
+						(*_tree)[ callstack.frames[start + i] ].get().size += size;
+						(*_tree)[ callstack.frames[start + i] ].get().hits ++;
+						//(*_tree)[ callstack.frames[start + i] ].get().total = 100.0 * size / wasted;
+						_tree = &(*_tree)[ callstack.frames[start + i] ];
+						set.insert( callstack.frames[start + i] );
+
+						size = (end - i == start ? L.size : 0);
+						(*_tree_inv)[ callstack.frames[end - i] ].get().size += size;
+						(*_tree_inv)[ callstack.frames[end - i] ].get().hits ++;
+						//(*_tree_inv)[ callstack.frames[end - i] ].get().total = 100.0 * size / wasted;
+						_tree_inv = &(*_tree_inv)[ callstack.frames[end - i] ];
+						set.insert( callstack.frames[end - i] );
+					}
+				}
+
+				// Some apps are low on memory in here, so we free memory as soon as possible
+				filtered = leaks();
+
+				if( !set.size() ) {
+					if( n_leak ) {
+						kTraceyPrintf( "%s", tracey::string("<tracey/tracey.cpp> says: error! failed to resolve symbols." $msvc(" Are PDB files available?") kTraceyCharLinefeed).c_str() );
+					}
+				} else {
+					kTraceyPrintf( "%s", tracey::string("<tracey/tracey.cpp> says: resolving \1 unique frames..." kTraceyCharLinefeed, set.size()).c_str() );
+					// convert set of unique frames into array of frames
+					tracey::callstack cs;
+					std::vector< void * > &frames = cs.frames;
+					frames.reserve( set.size() );
+					for( std::set< void * >::iterator it = set.begin(), end = set.end(); it != end; ++it ) {
+						frames.push_back( *it );
+					}
+					tracey::strings symbols = cs.unwind();
+					std::map< void *, std::string > translate;
+					{
+						if( frames.size() != symbols.size() ) {
+							kTraceyfPrintf( fp, "%s", tracey::string("<tracey/tracey.cpp> says: error! cannot resolve all frames (\1 vs \2)!" kTraceyCharLinefeed, frames.size(), symbols.size() ).c_str() );
+							for( unsigned i = 0, end = frames.size(); i < end; ++i ) {
+								translate[ frames[i] ] = tracey::string("\1", frames[i]);
+							}
+						} else {
+							for( unsigned i = 0, end = frames.size(); i < end; ++i ) {
+								translate[ frames[i] ] = symbols[ i ];
+							}
+						}
+
+						// Create a tree report, if possible
+						kTraceyPrintf( "%s", tracey::string("<tracey/tracey.cpp> says: converting tree of frames into tree of symbols..." kTraceyCharLinefeed).c_str() );
+						translate[ (void *)((~0)-1) ] = "begin";
+						translate[ (void *)((~0)-0) ] = "end";
+						tree.refresh();
+						//std::cout << tree << std::endl;
+
+						// truncate branches lower than user-defined percentage (it helps reducing log size)
+						// note: kTraceyTruncateBranchesSmallerThan defaults to 0% (~do not truncate branches, show all leaks)
+
+						kTraceyPrintf( "%s", tracey::string("<tracey/tracey.cpp> says: flattering tree of symbols..." kTraceyCharLinefeed).c_str() );
+						if( kTraceyTruncateBranchesSmallerThan > 0 ) {
+							tree.walk<tracey::chopper>();
+						}
+
+						kTraceyPrintf( "%s", tracey::string("<tracey/tracey.cpp> says: dumping tree log..." kTraceyCharLinefeed).c_str() );
+						kTraceyfPrintf( fp, "%s", tracey::print(tree, wasted, translate, "{tabs}[{size}] ({value}) {key}\n", "{value}", true).c_str() );
+					}
+				}
+
+				// Footer
+				kTraceyfPrintf( fp, "%s", tracey::string( "</xmp></body></html>" ).c_str() );
+				kTraceyfClose( fp );
+
+				return logfile;
+			}
+		};
+
+		void *tracer( void *ptr, size_t &size );
+
+		container &init() {
+			//static unsigned char buy[ sizeof( container ) ];
+			//static container *map = new (buy) container();
+			static $cpp11(std::unique_ptr) $cpp03(std::auto_ptr)<container> map( new container() );
+
+			static bool once = false; if(! once ) { once = true;
+				kTraceyPrintf( "%s", tracey::settings().c_str() );
+				if( 1 ) {
+					webmain( 0 );
+				}
+				if( 1 ) {
+					volatile bool sitdown = false;
+					std::thread(tracey::hotkeymain, (void *) &sitdown).detach();
+					while( !sitdown ) {
+					$windows( Sleep( 1000 ) );
+					$welse( sleep( 1 ) );
+					}
+				}
+				// Construct internals of tracer (static initializers)
+				// size_t dummy = 0;
+				// tracer( 0, dummy );
+			}
+			return *map;
+		}
+
+		void *tracer( void *ptr, size_t &size )
+		{
+			if( !ptr )
+				return size = 0, ptr;
+
+			if( !kTraceyEnabledHard )                       // hard on/off switch
+				return size = 0, ptr;
+
+			if( !kTraceyEnabledSoft && (size < (~0) - 4) )  // soft on/off switch; only for mallocs & frees
+				return size = 0, ptr;
+
+#if         kTraceyHookLegacyCRT
+			// do nothing
+#else
+			static bool initialized = true;
+			if( !initialized )
+				return size = 0, ptr;
+			static container *init = 0;
+			static const bool reinit = (initialized = false, init = &tracey::init(), initialized = true);
+			static container &map = *init;
+#endif
+
+			if ( !mutex )
+				return size = 0, ptr;
+
+			// threads will lock here till the slot is free.
+			// threads will return on recursive locks.
+
+			static $tls(bool) acquired = false;
+			mutex->lock();
+			if( acquired ) {
+				mutex->unlock();
+				return size = 0, ptr;
+			} else {
+				acquired = true;
+			}
+
+			// ready
+			container::iterator it = map.find( ptr );
+			bool found = ( it != map.end() );
+
+			if( size == ~0 || size == 0 )
+			{
+				if( found )
+				{
+					leak &L = it->second;
+					stats.overhead -= L.cs.space();
+					stats.usage -= L.size;
+					stats.num_leaks--;
+					L.wipe();
+				}
+				else
+				{
+					// 1st) wild pointer deallocation found; warn user
+					if( kTraceyReportWildPointers )
+						kTraceyPrintf( "%s", (tracey::string( "<tracey/tracey.cpp> says: Error, wild pointer deallocation." kTraceyCharLinefeed ) +
+							tracey::callstack( true ).flat( kTraceyCharTab "\1) \2" kTraceyCharLinefeed, kTraceyStacktraceSkipBegin) ).c_str() );
+
+					// 2nd) normalize ptr for further deallocation (deallocating null pointers is ok)
+					ptr = 0;
+				}
+			}
+			else
+			if( size == (~0) - 1 )
+			{
+				int code = *((int*)ptr);
+				//ptr = 0;
+				if( code == 1 ) {
+					map._clear();
+					stats = stats_t();
+					timestamp_id = create_id();
+				}
+
+				if( code == 2 ) { *((stats_t*)ptr) = stats; };
+				if( code == 3 ) (void)0;
+				if( code == 4 ) (void)0;
+			}
+			else
+			if( size == (~0) - 2 )
+			{
+				static char placement[ sizeof(std::string) ];
+				static std::string *log = new ((std::string *)placement) std::string();
+				*log = map._report();
+				ptr = (void *)log;
+			}
+			else
+			if( size == (~0) - 3 )
+			{
+				std::string &log = *((std::string *)(ptr));
+				view_report( log );
+			}
+			else
+			if( size == (~0) - 4 )
+			{
+				static char placement[ sizeof(std::string) ];
+				static std::string *log = new ((std::string *)placement) std::string();
+				*log = stats.str();
+				ptr = (void *)log;
+			}
+			else
+			{
+				if( found ) {
+					//if( kTraceyReportDoubleAllocations )
+						kTraceyPrintf( "%s", (tracey::string( "<tracey/tracey.cpp> says: Error, double pointer allocation. This should never happen" kTraceyCharLinefeed ) +
+							tracey::callstack( true ).flat( kTraceyCharTab "\1) \2" kTraceyCharLinefeed, kTraceyStacktraceSkipBegin) ).c_str() );
+					// kTraceyAssert( !map[ptr].first );
+					// kTraceyAssert( !map[ptr].second );
+				}
+				kTraceyAssert( size > 0 );
+
+				// create a leak and (re)insert it into map
+				tracey::detail::leak &leak = (map[ptr] = map[ptr]);
+				leak.wipe();
+				leak.cs.save();
+				leak.addr = ptr;
+				leak.size = size;
+
+				// update stats
+				stats.num_leaks++;
+				stats.usage += size;
+				stats.overhead += leak.cs.space();
+
+				// and peaks
+				if( leak.size   > stats.leak_peak  ) stats.leak_peak = leak.size;
+				if( stats.usage > stats.usage_peak ) stats.usage_peak = stats.usage;
+			}
+
+			acquired = false;
+			mutex->unlock();
+
+			return ptr;
+		}
+	};
+}
+
+namespace tracey
+{
+	void *watch( const void *ptr, size_t size ) {
+		tracer( (void *)ptr, size );
+		return (void *)ptr;
+	}
+	void *forget( const void *ptr ) {
+		size_t forget = (~0);
+		tracer( (void *)ptr, forget );
+		return (void *)ptr;
+	}
+	void enable() {
+		kTraceyEnabledSoft = true;
+	}
+	void disable() {
+		kTraceyEnabledSoft = false;
+	}
+	void clear() {
+		size_t opcode = 1, special_fn = (~0) - 1;
+		tracer( &opcode, special_fn );
+	}
+	std::string report() {
+		size_t special_fn = (~0) - 2;
+		return *((std::string *)tracey::tracer( (void*)&report, special_fn ));
+	}
+	void view( const std::string &report ) {
+		std::string copy = report;
+		size_t special_fn = (~0) - 3;
+		tracer( &copy, special_fn );
+	}
+	std::string summary() {
+		size_t special_fn = (~0) - 4;
+		return *((std::string *)tracey::tracer( (void*)&report, special_fn ));
+	}
+	void fail( const char *message ) {
+		kTraceyPrintf( "%s\n", message );
+		kTraceyAssert( !"<tracey/tracey.cpp> says: fail() requested" );
+		$throw(
+			throw std::runtime_error( message );
+		)
+		$telse(
+			kTraceyDie(__LINE__);
+		)
+	}
+	void badalloc() {
+		$throw(
+			throw std::bad_alloc();
+		)
+		tracey::fail( "<tracey/tracey.cpp> says: error! out of memory" );
+	}
+	std::string version() {
+		return "tracey-0.22.c";  /* format is major.minor.(a)lpha/(b)eta/(c)andidate/(r)elease */
+	}
+	std::string url() {
+		return "https://github.com/r-lyeh/tracey";
+	}
+	static void runtime_checks() {
+		// if md mdd + wild pointers
+		//
+	}
+	static std::string settings( const std::string &prefix ) {
+		tracey::string out;
+		out += tracey::string( "\1\2 ready" kTraceyCharLinefeed, prefix, tracey::version() );
+		if( tracey::lookup(url) == "????" ) {
+			out += tracey::string( "\1failed to decode symbols!! Is debug information available?" $msvc(" Are .PDB files available?") kTraceyCharLinefeed, prefix );
+		}
+		out += tracey::string( "\1using \2 as realloc" kTraceyCharLinefeed, prefix, tracey::lookup(kTraceyRealloc) );
+		out += tracey::string( "\1using \2 as memset" kTraceyCharLinefeed, prefix, tracey::lookup(kTraceyMemset) );
+		out += tracey::string( "\1using \2 as printf" kTraceyCharLinefeed, prefix, tracey::lookup(kTraceyPrintf) );
+		out += tracey::string( "\1using \2 as exit" kTraceyCharLinefeed, prefix, tracey::lookup(kTraceyDie) );
+		out += tracey::string( "\1using \2 as fopen" kTraceyCharLinefeed, prefix, tracey::lookup(kTraceyfOpen) );
+		out += tracey::string( "\1using \2 as fclose" kTraceyCharLinefeed, prefix, tracey::lookup(kTraceyfClose) );
+		out += tracey::string( "\1using \2 as fprintf" kTraceyCharLinefeed, prefix, tracey::lookup(kTraceyfPrintf) );
+		out += tracey::string( "\1with C++ exceptions=\2" kTraceyCharLinefeed, prefix, $throw("enabled") $telse("disabled") );
+		out += tracey::string( "\1with kTraceyBudgetOverhead=\2%" kTraceyCharLinefeed, prefix, (100 + kTraceyBudgetOverhead) );
+		out += tracey::string( "\1with kTraceyMaxStacktraces=\2 range[\3..\4]" kTraceyCharLinefeed, prefix, int(kTraceyMaxStacktraces), int(kTraceyStacktraceSkipBegin), int(kTraceyStacktraceSkipEnd) );
+		// kTraceyCharLinefeed
+		// kTraceyCharTab
+		out += tracey::string( "\1with kTraceyReportWildPointers=\2" kTraceyCharLinefeed, prefix, kTraceyReportWildPointers ? "yes" : "no" );
+		out += tracey::string( "\1with kTraceyDefineMemoryOperators=\2" kTraceyCharLinefeed, prefix, kTraceyDefineMemoryOperators ? "yes" : "no" );
+		out += tracey::string( "\1with kTraceyMemsetAllocations=\2" kTraceyCharLinefeed, prefix, kTraceyMemsetAllocations ? "yes" : "no" );
+		out += tracey::string( "\1with kTraceyStacktraceSkipBegin=\2" kTraceyCharLinefeed, prefix, int(kTraceyStacktraceSkipBegin) );
+		out += tracey::string( "\1with kTraceyStacktraceSkipEnd=\2" kTraceyCharLinefeed, prefix, int(kTraceyStacktraceSkipEnd) );
+		out += tracey::string( "\1with kTraceyReportOnExit=\2" kTraceyCharLinefeed, prefix, kTraceyReportOnExit ? "yes" : "no" );
+		out += tracey::string( "\1with kTraceyWebserverPort=\2" kTraceyCharLinefeed, prefix, int(kTraceyWebserverPort) );
+		out += tracey::string( "\1with kTraceyHookLegacyCRT=\2" kTraceyCharLinefeed, prefix, int(kTraceyHookLegacyCRT) );
+		out += tracey::string( "\1with kTraceyEnabled=\2" kTraceyCharLinefeed, prefix, int(kTraceyEnabled) );
+		return out;
+	}
+	std::string settings() {
+		return tracey::settings("<tracey/tracey.cpp> says: ");
+	}
+
+	// Extra
+
+	bool nop() {
+		tracey::free( tracey::forget( tracey::watch( tracey::malloc( 1 ), 1 ) ) );
+		return true;
+	}
+	bool install_c_hooks() {
+		return false;
+	}
+
+	void *realloc( void *ptr, size_t resize ) {
+		static const bool init = install_c_hooks();
+
+		ptr = kTraceyRealloc( ptr, (size_t)( resize + (kTraceyBudgetOverhead * resize) / 100.0 ) );
+
+		if( !ptr && resize )
+			tracey::badalloc();
+
+		return ptr;
+	}
+	void *malloc( size_t size ) {
+		void *ptr = tracey::realloc( 0, size );
+		return kTraceyMemsetAllocations ? kTraceyMemset( ptr, kTraceyMemsetChar, size ) : ptr;
+	}
+	void *calloc( size_t num, size_t size ) {
+		return kTraceyMemsetAllocations ? tracey::malloc( num * size ) : memset( tracey::malloc( num * size ), kTraceyMemsetChar, num * size );
+	}
+	void *free( void *ptr ) {
+		return tracey::realloc( ptr, 0 ), ptr;
+	}
+
+	void *amalloc( size_t size, size_t alignment ) {
+		// kids, dont do this at home. this is horrible.
+		std::vector<void *> invalids( 1, tracey::malloc(size) );
+		if( alignment ) {
+#          define is_aligned(POINTER, BYTE_COUNT) \
+				(((uintptr_t)(const void *)(POINTER)) % (BYTE_COUNT) == 0)
+			while( !is_aligned(invalids.back(),alignment) )
+				invalids.push_back( tracey::malloc( size ) );
+			if( invalids.size() > 1 ) {
+				std::swap( invalids.front(), invalids.back() );
+				for( unsigned i = 1; i < invalids.size(); ++i ) {
+					tracey::free( invalids[i] );
+				}
+			}
+		}
+		return invalids[0];
+	}
+}
+
+#if kTraceyDefineMemoryOperators
+
+//* Custom memory operators (with no exceptions)
+
+void *operator new( size_t size, const std::nothrow_t &t ) throw() {
+	return tracey::watch( tracey::malloc( size ), size );
+}
+
+void *operator new[]( size_t size, const std::nothrow_t &t ) throw() {
+	return tracey::watch( tracey::malloc( size ), size );
+}
+
+void operator delete( void *ptr, const std::nothrow_t &t ) throw() {
+	tracey::free( tracey::forget( ptr ) );
+}
+
+void operator delete[]( void *ptr, const std::nothrow_t &t ) throw() {
+	tracey::free( tracey::forget( ptr ) );
+}
+
+//* Custom memory operators (with exceptions)
+
+void *operator new( size_t size ) throw(std::bad_alloc) {
+	return tracey::watch( tracey::malloc( size ), size );
+}
+
+void *operator new[]( size_t size ) throw(std::bad_alloc) {
+	return tracey::watch( tracey::malloc( size ), size );
+}
+
+void operator delete( void *ptr ) throw() {
+	tracey::free( tracey::forget( ptr ) );
+}
+
+void operator delete[]( void *ptr ) throw() {
+	tracey::free( tracey::forget( ptr ) );
+}
+
+#endif
+
+namespace tracey {
+
+#if kTraceyWebserverPort
 
 static std::string p( const std::string &str ) { return tracey::string("<p>\1</p>", str); }
 static std::string h1( const std::string &str ) { return tracey::string("<h1>\1</h1>", str); }
@@ -1807,120 +3346,79 @@ static std::string a( const std::string &text, const std::string &href = "#" ) {
 static std::string ul( const std::string &str ) { return tracey::string("<ul>\1</ul>", str ); }
 static std::string li( const std::string &str ) { return tracey::string("<li>\1</li>", str ); }
 
-#define $quote(...) #__VA_ARGS__
 static tracey::string get_html_template() {
-return $quote(
-<!DOCTYPE html PUBLIC "-//W3C//DTD HTML 4.01//EN" "http://www.w3.org/TR/html4/strict.dtd">
-<html>
-<head>
-    <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
-    <title>{TITLE}</title>
-</head>
-<body>
-    <div id="header">
-        <h2>{TITLE}</h2>
-    </div>
-    <div id="content">
-        <p>{SUMMARY}</p>
-        <p>{REPORT}</p>
-        <p>{SETTINGS}</p>
-    </div>
-</body>
-</html>
-);
-}
-
-static int req(int socket, const std::string &input, const std::string &url ) {
-    std::string answer;
-    /**/ if( url == "/report" ) { answer += p("Tracey generating report"); tracey::view( tracey::report() ); }
-    else                        {}
-
-    tracey::string response = get_html_template().
-        replace("{TITLE}", "tracey webserver").
-        replace("{SETTINGS}", pre( tracey::settings("") ) ).
-        replace("{REPORT}", a("generate leak report (may take a while)", "report")).
-        replace("{SUMMARY}",  tracey::summary() );
-
-    tracey::string headers( "HTTP/1.1 200 OK\r\n"
-        "Content-Type: text/html;charset=UTF-8\r\n"
-        "Content-Length: \1\r\n"
-        "\r\n", response.size() );
-    WRITE( socket, headers.c_str(), headers.size() );
-    WRITE( socket, response.c_str(), response.size() );
-    return 0;
+	return $quote(
+		<!DOCTYPE html PUBLIC "-//W3C//DTD HTML 4.01//EN" "http://www.w3.org/TR/html4/strict.dtd">
+		<html>
+		<head>
+			<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+			<title>{TITLE}</title>
+		</head>
+		<body>
+			<div id="header">
+				<h2>{TITLE}</h2>
+			</div>
+			<div id="content">
+				<p>{SUMMARY}</p>
+				<p>{REPORT}</p>
+				<p>{SETTINGS}</p>
+			</div>
+		</body>
+		</html>
+	);
 }
 
 static void webmain( void *arg ) {
-    volatile bool &sitdown = *(volatile bool *)arg;
+	$cpp11(
+		if( kTraceyWebserverPort ) {
+			auto response = []() {
+				return get_html_template().
+					replace("{TITLE}", "tracey webserver").
+					replace("{SETTINGS}", pre( tracey::settings("") ) ).
+					replace("{REPORT}", a("generate leak report (may take a while)", "report")).
+					replace("{SUMMARY}",  tracey::summary() );
+			};
 
-    INIT();
+			route66::create( kTraceyWebserverPort, "/", [&]( route66::request &req, std::ostream &headers, std::ostream &content ) {
+				headers << route66::mime::html();
+				content << response();
+				return 200;
+			} );
 
-    int s = SOCKET(PF_INET, SOCK_STREAM, IPPROTO_IP);
-
-    {
-        struct sockaddr_in l = {AF_INET,htons(kTraceyWebserverPort),{INADDR_ANY}};
-        $welse(
-            int r = 1; setsockopt(s,SOL_SOCKET,SO_REUSEADDR,&r,sizeof(r));
-        )
-        BIND(s,(struct sockaddr *)&l,sizeof(l));
-        LISTEN(s,5);
-    }
-
-    sitdown = true;
-
-    for(;;) {
-        int c = ACCEPT(s,0,0), o = 0, h[2], hi = 0;
-        char b[1024];
-        while(hi<2&&o<1024) {
-            int n = READ(c,b+o,sizeof(b)-o);
-            if(n<=0) { break; }
-            else {
-                int i = o;
-                o+=n;
-                for(;i<n&&hi<2;i++) {
-                    if(b[i] == '/' || (hi==1&&b[i] == ' ')) { h[hi++] = i; }
-                }
-            }
-        }
-        if(hi == 2) {
-            b[ o ] = '\0';
-
-            char org = b[h[1]];
-            b[h[1]] = '\0';
-            std::string url( &b[4] ); //skip "GET "
-            b[h[1]] = org;
-
-            req(c,b,url);
-            SHUTDOWN(c);
-            CLOSE(c);
-        }
-    }
+			route66::create( kTraceyWebserverPort, "/report", [&]( route66::request &req, std::ostream &headers, std::ostream &content ) {
+				headers << route66::mime::html();
+				content << p("Tracey generating report");
+				tracey::view( tracey::report() );
+				return 200;
+			} );
+		}
+	)
 }
-} // tracey::
 
 #else
 
-namespace tracey {
-static void webmain( void *arg ) {}
-} // tracey::
+static void webmain( void *arg )
+{}
 
 #endif
 
-namespace tracey {
-    #pragma comment(lib, "user32.lib")
-    static void keymain( void *arg ) {
-        volatile bool &sitdown = *(volatile bool *)arg;
-        sitdown = true;
+} // tracey::
 
-        $windows(
-            for(;;) {
-                if( GetAsyncKeyState(VK_NUMLOCK) ) {
-                    tracey::view( tracey::report() );
-                }
-                Sleep( 1000/60 );
-            }
-        )
-    }
+namespace tracey {
+	#pragma comment(lib, "user32.lib")
+	static void hotkeymain( void *arg ) {
+		volatile bool &sitdown = *(volatile bool *)arg;
+		sitdown = true;
+
+		$windows(
+			for(;;) {
+				if( GetAsyncKeyState(VK_NUMLOCK) ) {
+					tracey::view( tracey::report() );
+				}
+				Sleep( 1000/60 );
+			}
+		)
+	}
 }
 
 // platform related, externals here.
@@ -1932,57 +3430,105 @@ namespace tracey {
 #ifdef _MSC_VER
 /* #pragma init_seg( ".CRT$XCA" ) */
 #endif
-static const bool lazy_init = tracey::install_c_hooks();
+static const bool lazy_init = (tracey::init(), tracey::install_c_hooks());
 #endif
 
+// C++ runtime API extension
+namespace tracey {
+	scope::scope() {
+		tracey::clear();
+		tracey::enable();
+	}
+	scope::~scope() {
+		tracey::disable();
+		if( tracey::stats.num_leaks > 0 ) tracey::view( tracey::report() );
+	}
+}
 
-#undef kTraceyAllocsOverhead
-#undef kTraceyAlloc
-#undef kTraceyFree
-#undef kTraceyRealloc
-#undef kTraceyPrintf
-#undef kTraceyMemset
-#undef kTraceyDie
-#undef kTraceyAssert
-#undef kTraceyFile
-#undef kTraceyfOpen
-#undef kTraceyfPrintf
-#undef kTraceyfClose
+// C runtime API
+extern "C" {
+		// Basic API
+		void *tracey_watch( const void *ptr, size_t size ) {
+			return tracey::watch( ptr, size );
+		}
+		void *tracey_forget( const void *ptr ) {
+			return tracey::forget( ptr );
+		}
+		void  tracey_enable() {
+			tracey::enable();
+		}
+		void  tracey_disable() {
+			tracey::disable();
+		}
+		void  tracey_clear() {
+			return tracey::clear();
+		}
 
-#undef kTraceyMaxStacktraces
-#undef kTraceyStacktraceSkipBegin
-#undef kTraceyStacktraceSkipEnd
-#undef kTraceyCharLinefeed
-#undef kTraceyCharTab
-#undef kTraceyMemsetAllocations
-#undef kTraceyDefineMemoryOperators
-#undef kTraceyReportWildPointers
-#undef kTraceyReportOnExit
-#undef kTraceyWebserver
-#undef kTraceyWebserverPort
+		// Information API  /*[!] free() return value after use */
+		char *tracey_report() {
+			return strdup( tracey::report().c_str() );
+		}
+		char *tracey_summary() {
+			return strdup( tracey::summary().c_str() );
+		}
+		char *tracey_version() {
+			return strdup( tracey::version().c_str() );
+		}
+		char *tracey_url() {
+			return strdup( tracey::url().c_str() );
+		}
+		char *tracey_settings() {
+			return strdup( tracey::settings().c_str() );
+		}
 
-#undef $warning
-#undef $has
-#undef $on
-#undef $is
+		// Report API
+		void  tracey_view( const char *const report ) {
+			tracey::view( report );
+		}
+		void  tracey_view_report() {
+			tracey::view( tracey::report() );
+		}
 
-#undef $telse
-#undef $throw
-#undef $celse
-#undef $clang
-#undef $melse
-#undef $msvc
-#undef $gelse
-#undef $gnuc
-#undef $release
-#undef $debug
+		// Unchecked memory API
+		void *tracey_unchecked_amalloc( size_t size, size_t alignment ) {
+			return tracey::amalloc( size, alignment );
+		}
+		void *tracey_unchecked_calloc( size_t num, size_t size ) {
+			return tracey::calloc( num, size );
+		}
+		void *tracey_unchecked_malloc( size_t size ) {
+			return tracey::malloc( size );
+		}
+		void *tracey_unchecked_realloc( void *ptr, size_t resize ) {
+			return tracey::realloc( ptr, resize );
+		}
+		void  tracey_unchecked_free( void *ptr ) {
+			tracey::free( ptr );
+		}
 
-#undef $lelse
-#undef $linux
-#undef $aelse
-#undef $apple
-#undef $welse
-#undef $windows
+		// Checked memory API
+		void *tracey_checked_amalloc( size_t size, size_t alignment ) {
+			return tracey::watch( tracey::amalloc( size, alignment ), size );
+		}
+		void *tracey_checked_calloc( size_t num, size_t size ) {
+			return tracey::watch( tracey::calloc( num, size ), num * size );
+		}
+		void *tracey_checked_malloc( size_t size ) {
+			return tracey::watch( tracey::malloc( size ), size );
+		}
+		void *tracey_checked_realloc( void *ptr, size_t resize ) {
+			return tracey::watch( tracey::realloc( tracey::forget( ptr ), resize ), resize );
+		}
+		void  tracey_checked_free( void *ptr ) {
+			tracey::free( tracey::forget( ptr ) );
+		}
 
-#undef $yes
-#undef $no
+		// Crash API
+		void tracey_fail( const char *message ) {
+			tracey::fail( message );
+		}
+		void tracey_badalloc() {
+			tracey::badalloc();
+		}
+}
+
