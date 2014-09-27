@@ -4,23 +4,8 @@
  *
  * Callstack code is based on Magnus Norddahl's work (ClanLib).
 
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- * THE SOFTWARE.
+ * Distributed under the Boost Software License, Version 1.0.
+ * (See license copy at http://www.boost.org/LICENSE_1_0.txt)
 
  * Features:
  * - tiny
@@ -123,7 +108,7 @@
 
 //#line 1 "oak.hpp"
 // a simple tree container
-// rlyeh. mit licensed
+// rlyeh. BOOST licensed
 
 //#pragma once
 #include <cassert>
@@ -1840,7 +1825,7 @@ std::string timestamp() {
 }
 
 /*
- * Simple prompt dialog (based on legolas558's code). MIT license.
+ * Simple prompt dialog (based on legolas558's code). BOOST license.
  * - rlyeh
  */
 
@@ -2213,7 +2198,7 @@ namespace std {
 
 //#line 1 "route66.cpp"
 // lightweight http server
-// - rlyeh, mit licensed. based on code by Ivan Tikhonov (zlib licensed)
+// - rlyeh, BOOST licensed. based on code by Ivan Tikhonov (zlib licensed)
 
 // @todo : arguments
 
@@ -2226,7 +2211,7 @@ namespace std {
 
 //#line 1 "route66.hpp"
 // lightweight http server
-// - rlyeh, mit licensed. based on code by Ivan Tikhonov (zlib licensed)
+// - rlyeh, BOOST licensed. based on code by Ivan Tikhonov (zlib licensed)
 
 /* to highlight API, remove this asterisk in a syntax highlighted editor --> */
 
