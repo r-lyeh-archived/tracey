@@ -204,6 +204,8 @@ Backend options in `tracey.hpp`. Tweak these until happy.
 - @todoc
 
 ### Changelog
+- 0.23-c
+  - Webserver support (w/ C++03)
 - 0.22-c
   - Source code clean up.
   - Faster implementation.

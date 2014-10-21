@@ -16,4 +16,9 @@ int main() {
     }
 
     tracey::disable(); // do not show final report on exit
+
+#if kTraceyWebserverPort
+    fprintf(stdout, "webserver at http://localhost:%d\n", kTraceyWebserverPort );
+    for(;;) fgetc(stdin);
+#endif
 }

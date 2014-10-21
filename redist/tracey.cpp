@@ -108,8 +108,9 @@
 #   include "deps/oak/oak.hpp"
 // }
 
-// external; OS utils. Here is where the fun starts {
+// external; macros, OS utils. Here is where the fun starts {
 #   define HEAL_MAX_TRACES kTraceyMaxStacktraces
+#   define heal tracey_heal
 #   include "deps/heal/heal.cpp" // also includes heal.hpp
 // }
 
@@ -127,12 +128,8 @@ namespace std {
 #endif
 
 // external; route66 uses c++11
-#if $on($cpp11)
+#if kTraceyWebserverPort
 #   include "deps/route66/route66.cpp"  // also includes route66.hpp
-#else
-    $warning( "<tracey/tracey.cpp> says: kTraceyWebserverPort disabled.")
-#   undef  kTraceyWebserverPort
-#   define kTraceyWebserverPort 0
 #endif
 
 // checks: todo
@@ -910,30 +907,31 @@ static tracey::string get_html_template() {
 }
 
 static void webmain( void *arg ) {
-    $cpp11(
-        if( kTraceyWebserverPort ) {
-            auto response = []() {
-                return get_html_template().
+    if( kTraceyWebserverPort ) {
+
+        struct local {
+            static 
+            int GET_root( route66::request &req, std::ostream &headers, std::ostream &content ) {
+                headers << route66::mime(".html");
+                content << get_html_template().
                     replace("{TITLE}", "tracey webserver").
                     replace("{SETTINGS}", pre( tracey::settings("") ) ).
                     replace("{REPORT}", a("generate leak report (may take a while)", "report")).
                     replace("{SUMMARY}",  tracey::summary() );
-            };
-
-            route66::create( kTraceyWebserverPort, "/", [&]( route66::request &req, std::ostream &headers, std::ostream &content ) {
-                headers << route66::mime::html();
-                content << response();
                 return 200;
-            } );
-
-            route66::create( kTraceyWebserverPort, "/report", [&]( route66::request &req, std::ostream &headers, std::ostream &content ) {
-                headers << route66::mime::html();
+            };
+            static
+            int GET_report( route66::request &req, std::ostream &headers, std::ostream &content ) {
+                headers << route66::mime(".html");
                 content << p("Tracey generating report");
                 tracey::view( tracey::report() );
                 return 200;
-            } );
-        }
-    )
+            } 
+        };
+
+        route66::create( kTraceyWebserverPort, "GET /", local::GET_root );
+        route66::create( kTraceyWebserverPort, "GET /report", local::GET_report );
+    }
 }
 
 #else

@@ -403,8 +403,9 @@ namespace oak
 
 // }
 
-// external; OS utils. Here is where the fun starts {
+// external; macros, OS utils. Here is where the fun starts {
 #   define HEAL_MAX_TRACES kTraceyMaxStacktraces
+#   define heal tracey_heal
 
 //#line 1 "heal.cpp"
 // A few tweaks before loading STL on MSVC
@@ -492,29 +493,20 @@ namespace oak
 //#line 1 "heal.hpp"
 // -- 8< -- 8< -- 8< -- 8< -- 8< -- 8< -- 8< -- 8< -- 8< -- 8< -- 8< -- 8< -- 8< -- 8< -- 8< -- 8< -- 8< -- 8< -- 8< -- 8< --
 
-/* Smart assert replacement for LHS/RHS values
- * Copyright (c) 2014 Mario 'rlyeh' Rodriguez
-
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- * THE SOFTWARE.
-
+/* Smart assert replacement for LHS/RHS values. BOOST licensed.
  * - rlyeh ~~ listening to Tuber / Desert Overcrowded
  */
+
+/* Public API */
+
+#include <cassert>
+
+#if !(defined(NDEBUG) || defined(_NDEBUG))
+#undef  assert
+#define assert(...) ( bool(__VA_ARGS__) ? \
+		( assertpp::check(#__VA_ARGS__,__FILE__,__LINE__,1) < __VA_ARGS__ ) : \
+		( assertpp::check(#__VA_ARGS__,__FILE__,__LINE__,0) < __VA_ARGS__ ) )
+#endif
 
 /* Private API */
 
@@ -533,11 +525,12 @@ namespace assertpp {
 	class check {
 		bool ok;
 		std::deque< std::string > xpr;
-		template<typename T> static std::string to_str( const T &t ) { std::stringstream ss; return ss << t ? ss.str() : "??"; }
+		template<typename T> static std::string to_str( const T &t ) { std::stringstream ss; return (ss << t) ? ss.str() : "??"; }
 	public:
 		check( const char *const text, const char *const file, int line, bool result )
 		:   xpr(4), ok(result)
 		{ xpr[0] = std::string(file) + ':' + to_str(line); xpr[2] = text; }
+
 		~check() {
 			if( xpr.empty() ) return;
 			operator bool();
@@ -547,12 +540,12 @@ namespace assertpp {
 				xpr[2] = xpr[2].substr( xpr[2][2] == ' ' ? 3 : 4 );
 				xpr[1].resize( (xpr[1] != xpr[2]) * xpr[1].size() );
 				std::string buf;
-				buf = "<heal/heal.hpp> says: expression failed! (" + xpr[1] + ") -> (" + xpr[2] + ") -> (unexpected) at " + xpr[0] + "\n";
+				buf = "<assert++> says: expression failed! (" + xpr[1] + ") -> (" + xpr[2] + ") -> (unexpected) at " + xpr[0] + "\n";
 				fprintf(stderr, "%s", buf.c_str() );
 				// assert fallback here
 				fclose( stderr );
 				fclose( stdout );
-				assert( !"<heal/heal.hpp> says: expression failed!" );
+				assert( !"<assert++> says: expression failed!" );
 				// user defined fallbacks here
 				for(;;) {}
 			};
@@ -573,45 +566,50 @@ namespace assertpp {
 	};
 }
 
-#endif
-
-/* Public API */
-
-#include <cassert>
-
-#if !(defined(NDEBUG) || defined(_NDEBUG))
-#undef  assert
-#define assert(...) ( bool(__VA_ARGS__) ? \
-		( assertpp::check(#__VA_ARGS__,__FILE__,__LINE__,1) < __VA_ARGS__ ) : \
-		( assertpp::check(#__VA_ARGS__,__FILE__,__LINE__,0) < __VA_ARGS__ ) )
-#endif
+#endif // ASSERTPP_HEADER
 
 // -- 8< -- 8< -- 8< -- 8< -- 8< -- 8< -- 8< -- 8< -- 8< -- 8< -- 8< -- 8< -- 8< -- 8< -- 8< -- 8< -- 8< -- 8< -- 8< -- 8< --
 
-#ifndef __HEALHPP__
-#define __HEALHPP__
+// std 11 <-> 03/w-boost bridge compatiblity layer, plus a few macro utils.
+// - rlyeh, boost licensed.
 
-#include <stdio.h>
+#ifndef __BRIDGE_HPP__
+#define __BRIDGE_HPP__
 
-#include <iostream>
-#include <istream>
-#include <map>
-#include <sstream>
-#include <string>
-#include <vector>
-#include <deque>
+#ifdef __SSE__
+#   define BOOST_HAS_INT128 1
+#   include <xmmintrin.h>
+#endif
 
 #if (__cplusplus < 201103L && !defined(_MSC_VER)) || (defined(_MSC_VER) && (_MSC_VER < 1700)) || (defined(__GLIBCXX__) && __GLIBCXX__ < 20130322L)
-#include <boost/function.hpp> // if old libstdc++ or msc libs are found, use boost::function
-#define $cpp11          $no
-#define $cpp03          $yes
+#   define BRIDGE_VERSION 2003
+#   include <boost/functional.hpp> // if old libstdc++ or msc libs are found, use boost::function
+#   include <boost/function.hpp>   //
+#   include <boost/thread.hpp>     // and boost::thread
+#   include <boost/cstdint.hpp>
+#   include <boost/type_traits.hpp>
+#   include <boost/bind.hpp>
+#   include <boost/bind/placeholders.hpp>
 namespace std {
-	using boost::function;
+	namespace placeholders {
+		//...
+	}
+	using namespace boost;
 }
 #else
-#include <functional>         // else assume modern c++11 and use std::function<> instead
+#   define BRIDGE_VERSION 2011
+#   include <functional>       // else assume modern c++11 and use std::function<> instead
+#   include <mutex>            // and std::mutex
+#   include <thread>           // and std::thread
+#   include <cstdint>
+#endif
+
+#if BRIDGE_VERSION >= 2011
 #define $cpp11          $yes
 #define $cpp03          $no
+#else
+#define $cpp11          $no
+#define $cpp03          $yes
 #endif
 
 // Thread Local Storage
@@ -632,6 +630,10 @@ namespace std {
 
 #define $yes(...)     __VA_ARGS__
 #define $no(...)
+
+#define $on(v)        (0 v(+1))  // usage: #if $on($msvc)
+#define $is           $on        // usage: #if $is($debug)
+#define $has(...)     $clang(__has_feature(__VA_ARGS__)) $celse(__VA_ARGS__) // usage: #if $has(cxx_exceptions)
 
 #if defined(_WIN32)
 #   define $windows   $yes
@@ -691,20 +693,16 @@ namespace std {
 #   define $celse     $yes
 #endif
 
-#define $on(v)        (0 v(+1))  // usage: #if $on($msvc)
-#define $is           $on        // usage: #if $is($debug)
-#define $has(...)     $clang(__has_feature(__VA_ARGS__)) $celse(__VA_ARGS__) // usage: #if $has(cxx_exceptions)
-
 #if $on($msvc) || $on($gnuc) || $on($clang)
-#define $undefined_compiler $no
+#   define $undefined_compiler $no
 #else
-#define $undefined_compiler $yes
+#   define $undefined_compiler $yes
 #endif
 
 #if $on($windows) || $on($linux) || $on($apple)
-#define $undefined_os $no
+#   define $undefined_os $no
 #else
-#define $undefined_os $yes
+#   define $undefined_os $yes
 #endif
 
 // try to detect if exceptions are enabled...
@@ -727,144 +725,170 @@ namespace std {
 #if $on($msvc)
 #   define $warning(msg) __pragma( message( msg ) )
 #elif $on($gnuc) || $on($clang)
-#   define $warning$message$impl(msg) _Pragma(#msg)
-#   define $warning(msg) $warning$message$impl( message( msg ) )
+#   define $$warning$impl(msg) _Pragma(#msg)
+#   define $warning(msg) $$warning$impl( message( msg ) )
 #else
 #   define $warning(msg)
 #endif
 
 // create a $warning(...) macro
 // usage: $warning("this is shown at compile time")
-#define $heal$todo$stringize$impl(X) #X
-#define $heal$todo$stringize(X) $heal$todo$stringize$impl(X)
-#define $todo(...) $warning( __FILE__ "(" $heal$todo$stringize(__LINE__)") : $todo - " #__VA_ARGS__ " - [ "__func__ " ]" )
+#define $$todo$stringize$impl(X) #X
+#define $$todo$stringize(X) $$todo$stringize$impl(X)
+#define $todo(...) $warning( __FILE__ "(" $$todo$stringize(__LINE__)") : $todo - " #__VA_ARGS__ " - [ "__func__ " ]" )
+
+#endif // __BRIDGE_HPP__
+
+// -- 8< -- 8< -- 8< -- 8< -- 8< -- 8< -- 8< -- 8< -- 8< -- 8< -- 8< -- 8< -- 8< -- 8< -- 8< -- 8< -- 8< -- 8< -- 8< -- 8< --
+
+/*
+ * Heal is a lightweight C++ framework to aid and debug applications.
+ * Copyright (c) 2011, 2012, 2013, 2014 Mario 'rlyeh' Rodriguez
+
+ * Callstack code is based on code by Magnus Norddahl (See http://goo.gl/LM5JB)
+ * Mem/CPU OS code is based on code by David Robert Nadeau (See http://goo.gl/8P5Jqv)
+
+ * Distributed under the Boost Software License, Version 1.0.
+ * (See license copy at http://www.boost.org/LICENSE_1_0.txt)
+
+ * - rlyeh // ~listening to Kalas - Monuments to Ruins
+ */
+
+#ifndef __HEALHPP__
+#define __HEALHPP__
+
+#include <stdio.h>
+
+#include <iostream>
+#include <istream>
+#include <map>
+#include <sstream>
+#include <string>
+#include <vector>
+#include <deque>
 
 /* public API */
 
 namespace heal {
 
-typedef std::function< int( const std::string &in ) > heal_callback_in;
+	typedef std::function< int( const std::string &in ) > heal_callback_in;
 
-extern std::vector< heal_callback_in > warns;
-extern std::vector< heal_callback_in > fails;
+	extern std::vector< heal_callback_in > warns;
+	extern std::vector< heal_callback_in > fails;
 
-void warn( const std::string &error );
-void fail( const std::string &error );
+	void warn( const std::string &error );
+	void fail( const std::string &error );
 
-void add_worker( heal_callback_in fn );
+	void add_worker( heal_callback_in fn );
 
-void die( const std::string &reason, int errorcode = -1 );
-void die( int errorcode = -1, const std::string &reason = std::string() );
+	void die( const std::string &reason, int errorcode = -1 );
+	void die( int errorcode = -1, const std::string &reason = std::string() );
 
-void breakpoint();
-bool debugger( const std::string &reason = std::string() );
+	void breakpoint();
+	bool debugger( const std::string &reason = std::string() );
 
-void alert();
-void alert( const          char *t, const std::string &title = std::string() );
-void alert( const   std::string &t, const std::string &title = std::string() );
-void alert( const std::istream &is, const std::string &title = std::string() );
-void alert( const        size_t &t, const std::string &title = std::string() );
-void alert( const        double &t, const std::string &title = std::string() );
-void alert( const         float &t, const std::string &title = std::string() );
-void alert( const           int &t, const std::string &title = std::string() );
-void alert( const          char &t, const std::string &title = std::string() );
-void alert( const          bool &t, const std::string &title = std::string() );
-void errorbox( const std::string &body = std::string(), const std::string &title = std::string() );
-std::string prompt( const std::string &current_value = std::string(), const std::string &title = std::string(), const std::string &caption = std::string() );
+	void alert();
+	void alert( const          char *t, const std::string &title = std::string() );
+	void alert( const   std::string &t, const std::string &title = std::string() );
+	void alert( const std::istream &is, const std::string &title = std::string() );
+	void alert( const        size_t &t, const std::string &title = std::string() );
+	void alert( const        double &t, const std::string &title = std::string() );
+	void alert( const         float &t, const std::string &title = std::string() );
+	void alert( const           int &t, const std::string &title = std::string() );
+	void alert( const          char &t, const std::string &title = std::string() );
+	void alert( const          bool &t, const std::string &title = std::string() );
+	void errorbox( const std::string &body = std::string(), const std::string &title = std::string() );
+	std::string prompt( const std::string &current_value = std::string(), const std::string &title = std::string(), const std::string &caption = std::string() );
 
-bool is_debug();
-bool is_release();
-bool is_asserting();
+	bool is_debug();
+	bool is_release();
+	bool is_asserting();
 
-#ifndef HEAL_MAX_TRACES
-#define HEAL_MAX_TRACES 128
-#endif
+	#ifndef HEAL_MAX_TRACES
+	#define HEAL_MAX_TRACES 128
+	#endif
 
-struct callstack /* : public std::vector<const void*> */ {
-	enum { max_frames = HEAL_MAX_TRACES };
-	std::vector<void *> frames;
-	callstack( bool autosave = false );
-	size_t space() const;
-	void save( unsigned frames_to_skip = 0 );
-	std::vector<std::string> unwind( unsigned from = 0, unsigned to = ~0 ) const;
-	std::vector<std::string> str( const char *format12 = "#\1 \2\n", size_t skip_begin = 0 ) const;
-	std::string flat( const char *format12 = "#\1 \2\n", size_t skip_begin = 0 ) const;
-};
+	struct callstack /* : public std::vector<const void*> */ {
+		enum { max_frames = HEAL_MAX_TRACES };
+		std::vector<void *> frames;
+		callstack( bool autosave = false );
+		size_t space() const;
+		void save( unsigned frames_to_skip = 0 );
+		std::vector<std::string> unwind( unsigned from = 0, unsigned to = ~0 ) const;
+		std::vector<std::string> str( const char *format12 = "#\1 \2\n", size_t skip_begin = 0 ) const;
+		std::string flat( const char *format12 = "#\1 \2\n", size_t skip_begin = 0 ) const;
+	};
 
-template<typename T>
-static inline
-std::string lookup( T *ptr ) {
-	callstack cs;
-	cs.frames.push_back( (void *)ptr );
-	std::vector<std::string> stacktrace = cs.unwind();
-	return stacktrace.size() ? stacktrace[0] : std::string("????");
-}
+	template<typename T>
+	static inline
+	std::string lookup( T *ptr ) {
+		callstack cs;
+		cs.frames.push_back( (void *)ptr );
+		std::vector<std::string> stacktrace = cs.unwind();
+		return stacktrace.size() ? stacktrace[0] : std::string("????");
+	}
 
-std::string demangle( const std::string &mangled );
-std::vector<std::string> stacktrace( const char *format12 = "#\1 \2\n", size_t skip_initial = 0 );
-std::string stackstring( const char *format12 = "#\1 \2\n", size_t skip_initial = 0 );
+	std::string demangle( const std::string &mangled );
+	std::vector<std::string> stacktrace( const char *format12 = "#\1 \2\n", size_t skip_initial = 0 );
+	std::string stackstring( const char *format12 = "#\1 \2\n", size_t skip_initial = 0 );
 
-std::string hexdump( const void *data, size_t num_bytes, const void *self = 0 );
+	std::string hexdump( const void *data, size_t num_bytes, const void *self = 0 );
 
-template<typename T> inline std::string hexdump( const T& obj ) {
-	return hexdump( obj.data(), obj.size() * sizeof(*obj.begin()), &obj );
-}
-$cpp11(
-template<> inline std::string hexdump( const std::nullptr_t &obj ) {
-	return hexdump( 0,0,0 );
-}
-)
-template<> inline std::string hexdump( const char &obj ) {
-	return hexdump( &obj, sizeof(obj), &obj );
-}
-template<> inline std::string hexdump( const short &obj ) {
-	return hexdump( &obj, sizeof(obj), &obj );
-}
-template<> inline std::string hexdump( const long &obj ) {
-	return hexdump( &obj, sizeof(obj), &obj );
-}
-template<> inline std::string hexdump( const long long &obj ) {
-	return hexdump( &obj, sizeof(obj), &obj );
-}
-template<> inline std::string hexdump( const unsigned char &obj ) {
-	return hexdump( &obj, sizeof(obj), &obj );
-}
-template<> inline std::string hexdump( const unsigned short &obj ) {
-	return hexdump( &obj, sizeof(obj), &obj );
-}
-template<> inline std::string hexdump( const unsigned long &obj ) {
-	return hexdump( &obj, sizeof(obj), &obj );
-}
-template<> inline std::string hexdump( const unsigned long long &obj ) {
-	return hexdump( &obj, sizeof(obj), &obj );
-}
-template<> inline std::string hexdump( const float &obj ) {
-	return hexdump( &obj, sizeof(obj), &obj );
-}
-template<> inline std::string hexdump( const double &obj ) {
-	return hexdump( &obj, sizeof(obj), &obj );
-}
-template<> inline std::string hexdump( const long double &obj ) {
-	return hexdump( &obj, sizeof(obj), &obj );
-}/*
-template<size_t N> inline std::string hexdump( const char (&obj)[N] ) {
-	return hexdump( &obj, sizeof(char) * N, &obj );
-}*/
+	template<typename T> inline std::string hexdump( const T& obj ) {
+		return hexdump( obj.data(), obj.size() * sizeof(*obj.begin()), &obj );
+	}
+	$cpp11(
+	template<> inline std::string hexdump( const std::nullptr_t &obj ) {
+		return hexdump( 0,0,0 );
+	}
+	)
+	template<> inline std::string hexdump( const char &obj ) {
+		return hexdump( &obj, sizeof(obj), &obj );
+	}
+	template<> inline std::string hexdump( const short &obj ) {
+		return hexdump( &obj, sizeof(obj), &obj );
+	}
+	template<> inline std::string hexdump( const long &obj ) {
+		return hexdump( &obj, sizeof(obj), &obj );
+	}
+	template<> inline std::string hexdump( const long long &obj ) {
+		return hexdump( &obj, sizeof(obj), &obj );
+	}
+	template<> inline std::string hexdump( const unsigned char &obj ) {
+		return hexdump( &obj, sizeof(obj), &obj );
+	}
+	template<> inline std::string hexdump( const unsigned short &obj ) {
+		return hexdump( &obj, sizeof(obj), &obj );
+	}
+	template<> inline std::string hexdump( const unsigned long &obj ) {
+		return hexdump( &obj, sizeof(obj), &obj );
+	}
+	template<> inline std::string hexdump( const unsigned long long &obj ) {
+		return hexdump( &obj, sizeof(obj), &obj );
+	}
+	template<> inline std::string hexdump( const float &obj ) {
+		return hexdump( &obj, sizeof(obj), &obj );
+	}
+	template<> inline std::string hexdump( const double &obj ) {
+		return hexdump( &obj, sizeof(obj), &obj );
+	}
+	template<> inline std::string hexdump( const long double &obj ) {
+		return hexdump( &obj, sizeof(obj), &obj );
+	}/*
+	template<size_t N> inline std::string hexdump( const char (&obj)[N] ) {
+		return hexdump( &obj, sizeof(char) * N, &obj );
+	}*/
 
-template<typename T> inline std::string hexdump( const T* obj ) {
-	if( !obj ) return hexdump(0,0,0);
-	return hexdump( *obj );
-}
-template<> inline std::string hexdump( const char *obj ) {
-	if( !obj ) return hexdump(0,0,0);
-	return hexdump( std::string(obj) );
-}
+	template<typename T> inline std::string hexdump( const T* obj ) {
+		if( !obj ) return hexdump(0,0,0);
+		return hexdump( *obj );
+	}
+	template<> inline std::string hexdump( const char *obj ) {
+		if( !obj ) return hexdump(0,0,0);
+		return hexdump( std::string(obj) );
+	}
 
-std::string timestamp();
-
-}
-
-namespace heal {
+	std::string timestamp();
 
 	// sfstring is a safe string replacement that does not rely on stringstream
 	// this is actually safer on corner cases, like crashes, exception unwinding and in exit conditions
@@ -1090,9 +1114,49 @@ $msvc(
 			return str( "\1" );
 		}
 	};
+
+	/*
+	 * determined on this OS.
+	 */
+	size_t get_mem_peak();
+
+	/**
+	 * Returns the current resident set size (physical memory use) measured
+	 * in bytes, or zero if the value cannot be determined on this OS.
+	 */
+	size_t get_mem_current();
+
+	/**
+	 * Returns the size of physical memory (RAM) in bytes.
+	 */
+	size_t get_mem_size();
+
+	/**
+	 * Returns the amount of CPU time used by the current process,
+	 * in seconds, or -1.0 if an error occurred.
+	 */
+	double get_time_cpu();
+
+	/**
+	 * Returns the real time, in seconds, or -1.0 if an error occurred.
+	 *
+	 * Time is measured since an arbitrary and OS-dependent start time.
+	 * The returned real time is only useful for computing an elapsed time
+	 * between two calls to this function.
+	 */
+	double get_time_clock();
+
+	std::string human_size( size_t bytes );
+	std::string human_time( double time );
+
+	std::string get_mem_peak_str();
+	std::string get_mem_current_str();
+	std::string get_mem_size_str();
+	std::string get_time_cpu_str();
+	std::string get_time_clock_str();
 }
 
-#endif
+#endif // __HEALHPP__
 
 // INFO MESSAGES
 // Reminders for retrieving symbols
@@ -1455,6 +1519,24 @@ void errorbox( const  std::string &body, const std::string &title ) { show( body
 #endif
 
 std::string demangle( const std::string &mangled ) {
+	$apple({
+		std::stringstream ss;
+		if( !(ss << mangled) )
+			return mangled;
+		std::string number, filename, address, funcname, plus, offset;
+		if( !(ss >> number >> filename >> address >> funcname >> plus >> offset) )
+			return mangled;
+		int status = 0;
+		char *demangled = abi::__cxa_demangle(funcname.c_str(), NULL, NULL, &status);
+		heal::sfstring out;
+		if( status == 0 && demangled ) {
+			out = std::string() + demangled + " ([" + filename + "]:" + offset + ")";
+		} else {
+			out = std::string() + funcname  + " ([" + filename + "]:" + offset + ")";
+		}
+		if( demangled ) free( demangled );
+		return out;
+	})
 	$linux({
 		$no( /* c++filt way */
 		FILE *fp = popen( (std::string("echo -n \"") + mangled + std::string("\" | c++filt" )).c_str(), "r" );
@@ -1478,21 +1560,6 @@ std::string demangle( const std::string &mangled ) {
 		if( demangled_.size() ) demangled_.pop_back(); //remove \n
 		return demangled_.size() && demangled_.at(0) == '?' ? mangled : demangled_;
 		)
-	})
-	$apple({
-		std::stringstream ss;
-		if( !(ss << mangled) )
-			return mangled;
-		std::string number, filename, address, funcname, plus, offset;
-		if( !(ss >> number >> filename >> address >> funcname >> plus >> offset) )
-			return mangled;
-		int status = 0;
-		char *demangled = abi::__cxa_demangle(funcname.c_str(), NULL, NULL, &status);
-		heal::sfstring out( mangled );
-		if( status == 0 && demangled )
-			out = out.replace( funcname, demangled );
-		if( demangled ) free( demangled );
-		return out;
 	})
 	$windows({
 		char demangled[1024];
@@ -1620,7 +1687,7 @@ std::string demangle( const std::string &mangled ) {
 							line64 = line64_blank;
 							DWORD displacement = 0;
 							if( SymGetLineFromAddr64( process, (DWORD64) frames[i], &displacement, &line64 ) ) {
-								backtraces[i] = heal::sfstring( "\1 (\2, line \3)", symbol64->Name, line64.FileName, line64.LineNumber );
+								backtraces[i] = heal::sfstring( "\1 (\2:\3)", symbol64->Name, line64.FileName, line64.LineNumber );
 							} else {
 								backtraces[i] = symbol64->Name;
 							}
@@ -2175,8 +2242,6 @@ std::string prompt( const std::string &current_value, const std::string &title, 
 #undef $yes
 */
 
-#undef $check
-
 
 // }
 
@@ -2194,124 +2259,13 @@ namespace std {
 #endif
 
 // external; route66 uses c++11
-#if $on($cpp11)
+#if kTraceyWebserverPort
 
 //#line 1 "route66.cpp"
 // lightweight http server
 // - rlyeh, BOOST licensed. based on code by Ivan Tikhonov (zlib licensed)
 
-// @todo : arguments
-
-#include <thread>
-#include <functional>
-#include <string>
-#include <map>
-#include <sstream>
-
-
-//#line 1 "route66.hpp"
-// lightweight http server
-// - rlyeh, BOOST licensed. based on code by Ivan Tikhonov (zlib licensed)
-
-/* to highlight API, remove this asterisk in a syntax highlighted editor --> */
-
-//#pragma once
-
-#include <functional>
-#include <vector>
-#include <string>
-#include <utility>
-#include <ostream>
-
-namespace route66 {
-
-	/*/ request: class
-	/*/
-	struct request {
-		/*/ url: raw request ('/search?req1=blabla&req2=whatever')
-		/*/ std::string url;
-		/*/ path: raw path url ('/search')
-		/*/ std::string path;
-		/*/ options: raw options url ('?req1=blabla&req2=whatever')
-		/*/ std::string options;
-		/*/ arguments: decoupled options as arguments ([0]={'req1','blabla'}, [1]={'req2','whatever'})
-		/*/ std::vector<std::pair<std::string, std::string>> arguments;
-	};
-
-	/*/ callback: alias
-	/*/ using callback = std::function<int(request&,std::ostream&,std::ostream &)>;
-
-	/*/ create(): start a daemon at given port and route path, callback will be invoked; returns false if failed.
-	/*/ bool create( unsigned port, const std::string &path, const route66::callback &callback );
-
-	/*/ mime: types
-	/*/
-	struct mime {
-		/*/ html(): mime type that is equal to "Content-Type: text/html; charset=utf-8\r\n"
-		/*/ static std::string html();
-		/*/ text(): mime type that is equal to "Content-Type: text/plain; charset=utf-8\r\n"
-		/*/ static std::string text();
-		/*/ json(): mime type that is equal to "Content-Type: application/json; charset=utf-8\r\n"
-		/*/ static std::string json();
-	};
-
-	/*/ httpcode: listing of HTTP result codes
-	/*/
-	struct httpcode {
-		unsigned code;
-		const char *const description;
-	};
-
-	/*/ 0XX route66
-	/*/ httpcode SHUTDOWN();
-	/*/ 1XX informational
-	/*/ httpcode CONTINUE(); /*/
-	/*/ httpcode SWITCH_PROTOCOLS();
-	/*/ 2XX success
-	/*/ httpcode OK(); /*/
-	/*/ httpcode CREATED(); /*/
-	/*/ httpcode ACCEPTED(); /*/
-	/*/ httpcode PARTIAL(); /*/
-	/*/ httpcode NO_CONTENT(); /*/
-	/*/ httpcode RESET_CONTENT(); /*/
-	/*/ httpcode PARTIAL_CONTENT(); /*/
-	/*/ httpcode WEBDAV_MULTI_STATUS();
-	/*/ 3XX redirection
-	/*/ httpcode AMBIGUOUS(); /*/
-	/*/ httpcode MOVED(); /*/
-	/*/ httpcode REDIRECT(); /*/
-	/*/ httpcode REDIRECT_METHOD(); /*/
-	/*/ httpcode NOT_MODIFIED(); /*/
-	/*/ httpcode USE_PROXY(); /*/
-	/*/ httpcode REDIRECT_KEEP_VERB();
-	/*/ 4XX client's fault
-	/*/ httpcode BAD_REQUEST(); /*/
-	/*/ httpcode DENIED(); /*/
-	/*/ httpcode PAYMENT_REQ(); /*/
-	/*/ httpcode FORBIDDEN(); /*/
-	/*/ httpcode NOT_FOUND(); /*/
-	/*/ httpcode BAD_METHOD(); /*/
-	/*/ httpcode NONE_ACCEPTABLE(); /*/
-	/*/ httpcode PROXY_AUTH_REQ(); /*/
-	/*/ httpcode REQUEST_TIMEOUT(); /*/
-	/*/ httpcode CONFLICT(); /*/
-	/*/ httpcode GONE(); /*/
-	/*/ httpcode LENGTH_REQUIRED(); /*/
-	/*/ httpcode PRECOND_FAILED(); /*/
-	/*/ httpcode REQUEST_TOO_LARGE(); /*/
-	/*/ httpcode URI_TOO_LONG(); /*/
-	/*/ httpcode UNSUPPORTED_MEDIA(); /*/
-	/*/ httpcode RETRY_WITH();
-	/*/ 5XX server's fault
-	/*/ httpcode SERVER_ERROR(); /*/
-	/*/ httpcode NOT_SUPPORTED(); /*/
-	/*/ httpcode BAD_GATEWAY(); /*/
-	/*/ httpcode SERVICE_UNAVAIL(); /*/
-	/*/ httpcode GATEWAY_TIMEOUT(); /*/
-	/*/ httpcode VERSION_NOT_SUP();
-}
-
-// Sockets
+// Sockets, taken from https://github.com/r-lyeh/knot
 
 #if defined(_WIN32)
 
@@ -2401,89 +2355,538 @@ namespace route66 {
 
 #endif
 
+#include <cstdlib>
+#include <cstdio>
+
+#include <fstream>
+#include <map>
+#include <sstream>
+#include <string>
+#include <vector>
+
+
+//#line 1 "route66.hpp"
+// lightweight http server
+// - rlyeh, BOOST licensed. based on code by Ivan Tikhonov (zlib licensed)
+
+/**/// <-- remove an asterisk in a code editor to highlight API
+
+//#pragma once
+
+#include <map>
+#include <ostream>
+#include <string>
+#include <utility>
+#include <sstream>
+
+// taken from https://github.com/r-lyeh/bridge {
+#if (__cplusplus < 201103L && !defined(_MSC_VER)) || (defined(_MSC_VER) && (_MSC_VER < 1700)) || (defined(__GLIBCXX__) && __GLIBCXX__ < 20130322L)
+#   include <boost/functional.hpp> // if old libstdc++ or msc libs are found, use boost::function
+#   include <boost/function.hpp>   //
+#   include <boost/thread.hpp>     // and boost::thread
+namespace std {
+	namespace placeholders {
+		//...
+	}
+	using namespace boost;
+}
+#else
+#   include <functional>       // else assume modern c++11 and use std::function<> instead
+#   include <mutex>            // and std::mutex
+#   include <thread>           // and std::thread
+#endif
+// }
+
 namespace route66 {
 
-std::string mime::html() { return "Content-Type: text/html; charset=utf-8\r\n"; }
-std::string mime::text() { return "Content-Type: text/plain; charset=utf-8\r\n"; }
-std::string mime::json() { return "Content-Type: application/json; charset=utf-8\r\n"; }
+	/*/ request:: 'class'
+	/*/
+	struct request {
+		std::string data;                              /*/      .data 'raw received data, as is' /*/
+		std::string method;                            /*/    .method 'raw method ("GET HEAD POST PUT ...")' /*/
+		std::string url;                               /*/       .url 'raw request ("/search?req1=blabla&req2=what%20ever")' /*/
+		std::string uri;                               /*/      .path 'decoded path uri ("/search")' /*/
+		std::string options;                           /*/   .options 'raw GET/POST options url ("req1=blabla&req2=what%20ever")' /*/
+		std::map<std::string, std::string> arguments;  /*/ .arguments 'decoded options decoupled as arguments ( {"req1","blabla"}, {"req2","what ever"} )' /*/
+		std::map<std::string, std::string> multipart;  /*/ .multipart 'multipart files when POST' /*/
+		std::string ip;                                /*/        .ip 'ip address of request' /*/
+		   unsigned port;                              /*/      .port 'number port of request' /*/
+		std::string str() const {
+			typedef std::map<std::string, std::string>::const_iterator cit;
+			std::stringstream ss;
+			ss << "route66::request[" << this << "] = {" << std::endl;
+			ss << "\t" "ip: " << ip << std::endl;
+			ss << "\t" "port: " << port << std::endl;
+			ss << "\t" "method: " << method << std::endl;
+			ss << "\t" "options: " << options << std::endl;
+			ss << "\t" "uri: " << uri << std::endl;
+			ss << "\t" "url: " << url << std::endl;
+			for( cit it = arguments.begin(), end = arguments.end(); it != end; ++it ) {
+				ss << "\t" "argument[" << it->first << "]: " << it->second << std::endl;
+			}
+			for( cit it = multipart.begin(), end = multipart.end(); it != end; ++it ) {
+				ss << "\t" "multipart[" << it->first << "]: " << it->second << std::endl;
+			}
+			ss << "\t" "data: " << data << std::endl;
+			ss << "}; //route66::request [" << this << "]" << std::endl;
+			return ss.str();
+		}
+	};
+
+	/*/ callback; 'alias'
+	/*/ typedef std::function< int(request &,std::ostream &,std::ostream &) > callback;
+
+	/*/ create() 'start a daemon at given port and route mask, callback will be invoked; returns false if failed.'
+	/*/ bool create( unsigned port, const std::string &mask, const route66::callback &callback );
+
+	/*/ fserve() 'start a file server daemon at given port and relative path, all file uri contents will be returned; returns false if failed.'
+	/*/ bool fserve( unsigned port, const std::string &mask, const std::string &relpath );
+
+	/*/ httpcode:: 'listing of HTTP result codes'
+	/*/
+	struct httpcode {
+		unsigned code;
+		const char *const description;
+	};
+
+	/*/ 0XX 'route66'
+	/*/
+	extern const httpcode SHUTDOWN;
+	/*/ 1XX 'informational'
+	/*/
+	extern const httpcode CONTINUE;
+	extern const httpcode SWITCH_PROTOCOLS;
+	/*/ 2XX 'success'
+	/*/
+	extern const httpcode OK;
+	extern const httpcode CREATED;
+	extern const httpcode ACCEPTED;
+	extern const httpcode PARTIAL;
+	extern const httpcode NO_CONTENT;
+	extern const httpcode RESET_CONTENT;
+	extern const httpcode PARTIAL_CONTENT;
+	extern const httpcode WEBDAV_MULTI_STATUS;
+	/*/ 3XX 'redirection'
+	/*/
+	extern const httpcode AMBIGUOUS;
+	extern const httpcode MOVED;
+	extern const httpcode REDIRECT;
+	extern const httpcode REDIRECT_METHOD;
+	extern const httpcode NOT_MODIFIED;
+	extern const httpcode USE_PROXY;
+	extern const httpcode REDIRECT_KEEP_VERB;
+	/*/ 4XX 'client error'
+	/*/
+	extern const httpcode BAD_REQUEST;
+	extern const httpcode DENIED;
+	extern const httpcode PAYMENT_REQ;
+	extern const httpcode FORBIDDEN;
+	extern const httpcode NOT_FOUND;
+	extern const httpcode BAD_METHOD;
+	extern const httpcode NONE_ACCEPTABLE;
+	extern const httpcode PROXY_AUTH_REQ;
+	extern const httpcode REQUEST_TIMEOUT;
+	extern const httpcode CONFLICT;
+	extern const httpcode GONE;
+	extern const httpcode LENGTH_REQUIRED;
+	extern const httpcode PRECOND_FAILED;
+	extern const httpcode REQUEST_TOO_LARGE;
+	extern const httpcode URI_TOO_LONG;
+	extern const httpcode UNSUPPORTED_MEDIA;
+	extern const httpcode RETRY_WITH;
+	/*/ 5XX 'server error'
+	/*/
+	extern const httpcode SERVER_ERROR;
+	extern const httpcode NOT_SUPPORTED;
+	extern const httpcode BAD_GATEWAY;
+	extern const httpcode SERVICE_UNAVAIL;
+	extern const httpcode GATEWAY_TIMEOUT;
+	extern const httpcode VERSION_NOT_SUP;
+
+	/*/ mime() 'MIME string header based on file extension (ie, sample.json -> "Content-Type: application/json; charset=utf-8\r\n" )' /*/
+	/*/ tag()  'MIME string tag based on file extension (ie, sample.json -> "application/json" )' /*/
+	std::string mime( const std::string &filename_ext );
+	std::string tag( const std::string &filename_ext );
+}
+
+namespace {
+	// http://stackoverflow.com/questions/2673207/c-c-url-decode-library
+	char * urldecode2(char *dst, const char *src) {
+		char a, b;
+		while (*src) {
+			if ((*src == '%') &&
+				((a = src[1]) && (b = src[2])) &&
+				(isxdigit(a) && isxdigit(b))) {
+					if (a >= 'a')
+							a -= 'a'-'A';
+					if (a >= 'A')
+							a -= ('A' - 10);
+					else
+							a -= '0';
+					if (b >= 'a')
+							b -= 'a'-'A';
+					if (b >= 'A')
+							b -= ('A' - 10);
+					else
+							b -= '0';
+					*dst++ = 16*a+b;
+					src+=3;
+			} else {
+				*dst++ = *src++;
+			}
+		}
+		*dst++ = '\0';
+		return dst - 1;
+	}
+
+	std::string &urldecode2( std::string &url ) {
+		char *begin = &url[0], *end = urldecode2( begin, begin );
+		url.resize( end - begin );
+		return url;
+	}
+
+	// taken from https://github.com/r-lyeh/wire
+	std::string replace( std::string s, const std::string &target, const std::string &repl ) {
+		for( size_t it = 0, tlen = target.length(), rlen = repl.length(); ( it = s.find( target, it ) ) != std::string::npos; it += rlen ) {
+			s.replace( it, tlen, repl );
+		}
+		return s;
+	};
+	std::vector< std::string > tokenize( const std::string &self, const std::string &delimiters ) {
+		std::string map( 256, '\0' );
+		for( std::string::const_iterator it = delimiters.begin(), end = delimiters.end(); it != end; ++it ) {
+			unsigned char ch( *it );
+			map[ ch ] = '\1';
+		}
+		std::vector< std::string > tokens(1);
+		for( std::string::const_iterator it = self.begin(), end = self.end(); it != end; ++it ) {
+			unsigned char ch( *it );
+			/**/ if( !map.at(ch)          ) tokens.back().push_back( char(ch) );
+			else if( tokens.back().size() ) tokens.push_back( std::string() );
+		}
+		while( tokens.size() && !tokens.back().size() ) tokens.pop_back();
+		return tokens;
+	}
+	bool match( const char *pattern, const char *str ) {
+		if( *pattern=='\0' ) return !*str;
+		if( *pattern=='*' )  return match(pattern+1, str) || *str && match(pattern, str+1);
+		if( *pattern=='?' )  return *str && (*str != '.') && match(pattern+1, str+1);
+		return (*str == *pattern) && match(pattern+1, str+1);
+	}
+	bool matches( const std::string &self, const std::string &pattern ) {
+		return match( pattern.c_str(), self.c_str() );
+	}
+	bool endswith( const std::string &self, const std::string &eof ) {
+		return eof.size() < self.size() && self.substr( self.size() - eof.size() ) == eof;
+	}
+}
+
+namespace route66 {
+
+std::string tag( const std::string &pathfile ) {
+	static std::map< std::string, std::string> mimes;
+	if( mimes.empty() ) {
+		// [ref] taken from http://en.wikipedia.org/wiki/Internet_media_type
+
+		mimes[".avi"] = "video/avi";                  // Covers most Windows-compatible formats including .avi and .divx[16]
+		mimes[".mpg"] = "video/mpeg";                 // MPEG-1 video with multiplexed audio; Defined in RFC 2045 and RFC 2046
+		mimes[".mpeg"] = "video/mpeg";                // MPEG-1 video with multiplexed audio; Defined in RFC 2045 and RFC 2046
+		mimes[".mp4"] = "video/mp4";                  // MP4 video; Defined in RFC 4337
+		mimes[".mov"] = "video/quicktime";            // QuickTime video; Registered[17]
+		mimes[".webm"] = "video/webm";                // WebM Matroska-based open media format
+		mimes[".mkv"] = "video/x-matroska";           // Matroska open media format
+		mimes[".wmv"] = "video/x-ms-wmv";             // Windows Media Video; Documented in Microsoft KB 288102
+		mimes[".flv"] = "video/x-flv";                // Flash video (FLV files)
+
+		mimes[".css"] = "text/css";                   // Cascading Style Sheets; Defined in RFC 2318
+		mimes[".csv"] = "text/csv";                   // Comma-separated values; Defined in RFC 4180
+		mimes[".htm"] = "text/html";                  // HTML; Defined in RFC 2854
+		mimes[".html"] = "text/html";                 // HTML; Defined in RFC 2854
+		mimes[".txt"] = "text/plain";                 // Textual data; Defined in RFC 2046 and RFC 3676
+		mimes[".text"] = "text/plain";                // Textual data; Defined in RFC 2046 and RFC 3676
+		mimes[".rtf"] = "text/rtf";                   // RTF; Defined by Paul Lindner
+		mimes[".xml"] = "text/xml";                   // Extensible Markup Language; Defined in RFC 3023
+		mimes[".tsv"] = "text/tab-separated-values";
+
+		mimes[".gif"] = "image/gif";                  // GIF image; Defined in RFC 2045 and RFC 2046
+		mimes[".jpg"] = "image/jpeg";                 // JPEG JFIF image; Defined in RFC 2045 and RFC 2046
+		mimes[".jpeg"] = "image/jpeg";                // JPEG JFIF image; Defined in RFC 2045 and RFC 2046
+		mimes[".pjpg"] = "image/pjpeg";               // JPEG JFIF image; Associated with Internet Explorer; Listed in ms775147(v=vs.85) - Progressive JPEG, initiated before global browser support for progressive JPEGs (Microsoft and Firefox).
+		mimes[".pjpeg"] = "image/pjpeg";              // JPEG JFIF image; Associated with Internet Explorer; Listed in ms775147(v=vs.85) - Progressive JPEG, initiated before global browser support for progressive JPEGs (Microsoft and Firefox).
+		mimes[".png"] = "image/png";                  // Portable Network Graphics; Registered,[13] Defined in RFC 2083
+		mimes[".svg"] = "image/svg+xml";              // SVG vector image; Defined in SVG Tiny 1.2 Specification Appendix M
+		mimes[".psd"] = "image/vnd.adobe.photoshop";
+
+		mimes[".aif"] = "audio/x-aiff";
+		mimes[".s3m"] = "audio/s3m";
+		mimes[".xm"] = "audio/xm";
+		mimes[".snd"] = "audio/x-adpcm";
+		mimes[".mp3"] = "audio/mpeg3";
+		mimes[".ogg"] = "audio/ogg";                  // Ogg Vorbis, Speex, Flac and other audio; Defined in RFC 5334
+		mimes[".opus"] = "audio/opus";                // Opus audio
+		mimes[".vorbis"] = "audio/vorbis";            // Vorbis encoded audio; Defined in RFC 5215
+		mimes[".wav"] = "audio/x-wav";
+
+		mimes[".atom"] = "application/atom+xml";      // Atom feeds
+		mimes[".dart"] = "application/dart";          // Dart files [8]
+		mimes[".ejs"] = "application/ecmascript";     // ECMAScript/JavaScript; Defined in RFC 4329 (equivalent to application/javascript but with stricter processing rules)
+		mimes[".json"] = "application/json";          // JavaScript Object Notation JSON; Defined in RFC 4627
+		mimes[".js"] = "application/javascript";      // ECMAScript/JavaScript; Defined in RFC 4329 (equivalent to application/ecmascript but with looser processing rules) It is not accepted in IE 8 or earlier - text/javascript is accepted but it is defined as obsolete in RFC 4329. The "type" attribute of the <script> tag in HTML5 is optional. In practice, omitting the media type of JavaScript programs is the most interoperable solution, since all browsers have always assumed the correct default even before HTML5.
+		mimes[".bin"] = "application/octet-stream";   // Arbitrary binary data.[9] Generally speaking this type identifies files that are not associated with a specific application. Contrary to past assumptions by software packages such as Apache this is not a type that should be applied to unknown files. In such a case, a server or application should not indicate a content type, as it may be incorrect, but rather, should omit the type in order to allow the recipient to guess the type.[10]
+		mimes[".pdf"] = "application/pdf";            // Portable Document Format, PDF has been in use for document exchange on the Internet since 1993; Defined in RFC 3778
+		mimes[".ps"] = "application/postscript";      // PostScript; Defined in RFC 2046
+		mimes[".rdf"] = "application/rdf+xml";        // Resource Description Framework; Defined by RFC 3870
+		mimes[".rss"] = "application/rss+xml";        // RSS feeds
+		mimes[".soap"] = "application/soap+xml";      // SOAP; Defined by RFC 3902
+		mimes[".font"] = "application/font-woff";     // Web Open Font Format; (candidate recommendation; use application/x-font-woff until standard is official)
+		mimes[".xhtml"] = "application/xhtml+xml";    // XHTML; Defined by RFC 3236
+		mimes[".xml"] = "application/xml";            // XML files; Defined by RFC 3023
+		mimes[".zip"] = "application/zip";            // ZIP archive files; Registered[11]
+		mimes[".gz"] = "application/gzip";            // Gzip, Defined in RFC 6713
+		mimes[".nacl"] = "application/x-nacl";        // Native Client web module (supplied via Google Web Store only)
+		mimes[".pnacl"] = "application/x-pnacl";      // Portable Native Client web module (may supplied by any website as it is safer than x-nacl)
+	};
+
+	size_t ext = pathfile.find_last_of(".");
+	if( ext != std::string::npos ) {
+		std::map<std::string, std::string>::const_iterator found = mimes.find( &pathfile[ext] );
+		if( found != mimes.end() ) {
+			return found->second;
+		}
+	}
+	return mimes[".txt"];
+}
+
+std::string mime( const std::string &filename_ext ) {
+	return std::string("Content-Type: ") + tag(filename_ext) + "; charset=utf-8\r\n";
+};
+
+std::string interval_from_headers( const std::string &header, const std::string &text1, const std::string &text2 ) {
+	size_t pos = header.find(text1);
+	if( pos == std::string::npos ) {
+		return std::string();
+	}
+	pos += text1.size();
+	size_t pos2 = header.find(text2, pos);
+	if( pos2 == std::string::npos ) {
+		return header.substr(pos);
+	} else {
+		return header.substr(pos, pos2-pos);
+	}
+}
+
+std::string extract_from_headers( const std::string &header, const std::string &text ) {
+	size_t pos = header.find(text);
+	if( pos == std::string::npos ) {
+		return std::string();
+	}
+	pos += text.size();
+	size_t pos2 = header.find( "\r\n", pos );
+	if( pos2 == std::string::npos ) {
+		return header.substr(pos);
+	} else {
+		return header.substr(pos, pos2-pos);
+	}
+}
 
 struct daemon {
-	const int socket;
+	int socket;
 	const std::map< std::string /*path*/, route66::callback /*fn*/ > *routers;
+	std::string base;
+
+	daemon() : socket(-1), routers(0)
+	{}
 
 	void operator()() {
 		bool shutdown = false;
 		while( !shutdown ) {
-			int child = ACCEPT(socket,0,0), o = 0, h[2], hi = 0;
+			enum { buflen = 1024 * 1024, SPACES = 2 /*>=2*/ };
+
+			int child = ACCEPT(socket,0,0), o = 0, h[SPACES] = {}, hi = 0;
 			if( child < 0 ) continue;
-			char b[1024];
-			while(hi<2&&o<1024) {
-				int n = READ(child,b+o,sizeof(b)-o);
+
+			std::string buf( buflen, '\0' );
+			char *b = &buf[0];
+
+			while(hi<SPACES&&o<buflen) {
+				int n = READ(child,b+o,buflen-o);
 				if(n<=0) { break; }
 				else {
 					int i = o;
 					o+=n;
-					for(;i<n&&hi<2;i++) {
-					if((hi < 2) && b[i] == ' ') { h[hi++] = i; }
+					for(;i<n&&hi<SPACES;i++) {
+					if((hi < SPACES) && b[i] == ' ') { h[hi++] = i; }
 					}
 				}
 			}
-			if(hi == 2) {
+
+			if(hi >= SPACES) {
 				b[ o ] = '\0';
+				buf.resize( o );
+
+				const char *logmask = std::getenv("R66LOG");
+				if( logmask ) {
+					if( matches(b, logmask) ) {
+						//__asm int 3;
+						//fprintf(stdout, "%s,%s\n", multipart.c_str(), boundary.c_str());
+					}
+				}
+
+				typedef std::map< std::string, std::string > filemap;
+				static std::map< std::string /*boundary*/, filemap > boundaries;
+
+				unsigned curlen = 0;
+
+				std::string boundary = std::string("--") + extract_from_headers( buf, "Content-Type: multipart/form-data; boundary=");
+				std::string eof = boundary + "--\r\n";
+				std::string headers = buf.substr( 0, buf.find("\r\n\r\n") + 4 );
+				std::string payload = buf.substr( headers.size() );
+
+				while( boundary.size() > 2 && !endswith( payload, eof ) ) {
+					std::stringstream head1, head2;
+					head1 << "HTTP/1.1 100 Continue\r\n";
+					WRITE( child, head1.str().c_str(), head1.str().size() );
+
+					o = 0;
+					buf.clear();
+					buf.resize( buflen, '\0' );
+
+					int n;
+					n = READ(child,b+o,buflen-o);
+					if(n<=0) { break; }
+
+					buf.resize( n );
+
+					payload += buf;
+				}
+
+				route66::request rq;
+
+				if( boundary.size() > 2 ) {
+					payload = interval_from_headers( payload, boundary + "\r\n", boundary );
+
+					{
+						std::string headers = payload.substr( 0, payload.find("\r\n\r\n") + 4 );
+						std::string file = extract_from_headers( headers, "Content-Disposition: form-data; name=");
+						file = file.substr( 1, file.size() - 2 ); // remove ""
+
+						payload = payload.substr( headers.size() );
+						rq.multipart[ file ] = payload;
+					}
+
+					buf = headers;
+				}
+
+				rq.data = buf;
 
 				char org = b[h[1]];
 				b[h[1]] = '\0';
-				/*
-				std::cout << h[0] << std::endl;
-				std::cout << h[1] << std::endl;
-				*/
+
+#if 1
+				socklen_t len;
+				struct sockaddr_storage addr;
+				char ipstr[INET_ADDRSTRLEN];
+				len = sizeof addr;
+				getpeername(child, (struct sockaddr*) &addr, &len);
+				struct sockaddr_in *s = (struct sockaddr_in *) &addr;
+				inet_ntop(AF_INET, &s->sin_addr, ipstr, sizeof ipstr);
+				if( strcmp("127.0.0.1", ipstr) == 0 ) rq.ip = "localhost";
+				else rq.ip = ipstr;
+
+				struct sockaddr_in l;
+				len = sizeof(l);
+				if (getsockname(child, (struct sockaddr *)&l, &len) != -1) {
+					rq.port = ntohs(l.sin_port);
+				} else {
+					rq.port = 0;
+				}
+#endif
+
+				std::string method( b, h[0] );
 				std::string url( &b[h[0]+1] ); //skip "GET "
 				b[h[1]] = org;
 
 				std::string path, options;
 
-				auto mark = url.find_first_of('?');
+				size_t mark = url.find_first_of('?');
 				if( mark == std::string::npos ) {
 					path = url;
 				} else {
 					path = url.substr( 0, mark );
-					options = url.substr( mark );
+					options = url.substr( mark + 1 );
 				}
-				/*
-				std::cout << "url: " << url << std::endl;
-				std::cout << "path: " << path << std::endl;
-				std::cout << "options: " << options << std::endl;
-				*/
-				auto found = routers->find( path );
+
+				if( method == "PUT" || method == "POST" )  {
+					options = &b[ std::string(b).find("\r\n\r\n") + 4 ];
+				}
+
+				std::string route = method + " " + path;
+				std::map< std::string, route66::callback >::const_iterator found = routers->find( route );
+				if( found == routers->end() ) {
+					// bad route, try index wildcard matching
+					for( found = routers->begin(); found != routers->end(); ++found ) {
+						if( matches( route, found->first ) ) {
+							break;
+						}
+					}
+				}
 				if( found == routers->end() ) {
 					// bad route, try index fallback
-					found = routers->find("/");
+					found = routers->find("GET /");
 				}
 
 				if( found != routers->end() ) {
-					route66::request rq;
+
+					rq.method = method;
 					rq.url = url;
-					rq.path = path;
+					rq.uri = path;
 					rq.options = options;
-					// @todo : arguments
 
-					auto &fn = found->second;
-					std::stringstream headers, contents;
-					int httpcode = fn( rq, headers, contents );
+					urldecode2( rq.uri );
 
-					std::string datas = contents.str();
-					shutdown = ( 0 == httpcode ? true : false );
-
-					if( !shutdown && datas.size() ) {
-						std::string head1 = std::string("HTTP/1.1 ") + std::to_string(httpcode) + " OK\r\n";
-						std::string head2 = headers.str() +
-							"Content-Length: " + std::to_string( datas.size() ) + "\r\n"
-							"\r\n";
-
-						WRITE( child, head1.c_str(), head1.size() );
-						WRITE( child, head2.c_str(), head2.size() );
-						WRITE( child, datas.c_str(), datas.size() );
+					// arguments
+					std::vector< std::string > split = tokenize( options, "&" );
+					for( std::vector< std::string >::const_iterator it = split.begin(), end = split.end(); it != end; ++it ) {
+						const std::string &glued = *it;
+						std::vector< std::string > pair = tokenize( glued, "=" );
+						if( 2 == pair.size() ) {
+							rq.arguments[ urldecode2(pair[0]) ] = urldecode2(pair[1]);
+						} else {
+							rq.arguments[ urldecode2(pair[0]) ] = std::string();
+						}
 					}
+
+					// normalize & rebase (if needed)
+					if( rq.uri == "" || rq.uri == "/" ) rq.uri = "index.html";
+					rq.uri = base + rq.uri;
+
+					if( logmask ) {
+						char addr[64]; sprintf(addr, "%s:%d", rq.ip.c_str(), rq.port );
+						if( matches(addr, logmask) || matches(rq.uri, logmask) || matches(rq.data, logmask) ) {
+							fprintf(stdout, "%s - %s\n%s\n", addr, rq.uri.c_str(), rq.str().c_str());
+						}
+					}
+
+					{
+						const route66::callback &fn = found->second;
+						std::stringstream headers, contents;
+						int httpcode = fn( rq, headers, contents );
+
+						std::string datas = contents.str();
+						shutdown = ( 0 == httpcode ? true : false );
+
+						if( !shutdown && datas.size() ) {
+							std::stringstream head1, head2;
+							head1 << "HTTP/1.1 " << httpcode << " OK\r\n";
+							head2 << headers.str() << "Content-Length: " << datas.size() << "\r\n\r\n";
+
+							WRITE( child, head1.str().c_str(), head1.str().size() );
+							WRITE( child, head2.str().c_str(), head2.str().size() );
+							if( method != "HEAD" )
+							WRITE( child, datas.c_str(), datas.size() );
+						}
+					}
+
 				}
 
 				SHUTDOWN(child);
@@ -2493,92 +2896,166 @@ struct daemon {
 	}
 };
 
-bool create( unsigned port, const std::string &path, const route66::callback &fn ) {
-	using routers = std::map< std::string /*path*/, route66::callback /*fn */>;
-	static std::map< unsigned, routers > daemons;
+namespace {
 
-	if( daemons.find(port) == daemons.end() ) {
-		INIT();
-		int socket = SOCKET(PF_INET, SOCK_STREAM, IPPROTO_IP);
-		if( socket < 0 ) {
-			return "cannot init socket", false;
+	typedef std::map< std::string /*path*/, route66::callback /*fn */> routers;
+
+	bool create( unsigned port, const std::string &mask, const route66::callback &fn, std::string base ) {
+		static std::map< unsigned, routers > daemons;
+
+		if( daemons.find(port) == daemons.end() ) {
+			INIT();
+			int socket = SOCKET(PF_INET, SOCK_STREAM, IPPROTO_IP);
+			if( socket < 0 ) {
+				return "cannot init socket", false;
+			}
+
+			struct sockaddr_in l;
+			memset( &l, 0, sizeof(sockaddr_in) );
+			l.sin_family = AF_INET;
+			l.sin_port = htons(port);
+			l.sin_addr.s_addr = INADDR_ANY;
+	#       if !defined(_WIN32)
+			int r = 1; setsockopt(socket,SOL_SOCKET,SO_REUSEADDR,&r,sizeof(r));
+	#       endif
+			BIND(socket,(struct sockaddr *)&l,sizeof(l));
+			LISTEN(socket,5);
+
+			route66::daemon dm;
+			dm.socket = socket;
+			dm.routers = &daemons[ port ];
+			dm.base = base;
+			std::thread( dm ).detach();
 		}
 
-		struct sockaddr_in l;
-		memset( &l, 0, sizeof(sockaddr_in) );
-		l.sin_family = AF_INET;
-		l.sin_port = htons(port);
-		l.sin_addr.s_addr = INADDR_ANY;
-	#if !defined(_WIN32)
-		int r = 1; setsockopt(socket,SOL_SOCKET,SO_REUSEADDR,&r,sizeof(r));
-	#endif
-		BIND(socket,(struct sockaddr *)&l,sizeof(l));
-		LISTEN(socket,5);
+		daemons[ port ][ mask ] = fn;
 
-		std::thread( route66::daemon{ socket, &daemons[ port ] } ).detach();
+		return "ok", true;
+	}
+}
+
+bool create( unsigned port, const std::string &mask, const route66::callback &fn ) {
+	return create( port, mask, fn, std::string() );
+}
+
+namespace {
+
+	std::string get_app_folder() {
+#       ifdef _WIN32
+			char s_path[MAX_PATH] = {0};
+			const size_t len = MAX_PATH;
+
+			HMODULE mod = 0;
+			::GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS, (LPCSTR)&get_app_folder, &mod);
+			DWORD size = ::GetModuleFileNameA(mod, s_path, (DWORD)len);
+
+			while( size > 0 ) {
+				if( s_path[size] == '\\' ) {
+					s_path[size+1] = '\0';
+					return s_path;
+				}
+				--size;
+			}
+			return std::string();
+#       else
+			char arg1[20];
+			char exepath[PATH_MAX + 1] = {0};
+
+			sprintf( arg1, "/proc/%d/exe", getpid() );
+			readlink( arg1, exepath, 1024 );
+			return std::string( exepath );
+#       endif
 	}
 
-	daemons[ port ][ path ] = fn;
-	return "ok", true;
+	int file_reader( route66::request &request, std::ostream &headers, std::ostream &contents ) {
+		std::ifstream ifs( request.uri.c_str(), std::ios::binary );
+		if( ifs.good() ) {
+			headers << route66::mime(request.uri);
+			contents << ifs.rdbuf();
+			return 200;
+		} else {
+			headers << route66::mime(".text");
+			contents << "404: not found" << std::endl;
+			//contents << request.uri << std::endl;
+			return 404;
+		}
+	}
 }
 
+bool fserve( unsigned port, const std::string &mask, const std::string &path ) {
+	return create( port, mask, file_reader, get_app_folder() + path );
+}
+
+#undef INIT
+#undef SOCKET
+#undef ACCEPT
+#undef CONNECT
+#undef CLOSE
+#undef RECV
+#undef READ
+#undef SELECT
+#undef SEND
+#undef WRITE
+#undef GETSOCKOPT
+#undef SETSOCKOPT
+
+#undef BIND
+#undef LISTEN
 #undef SHUTDOWN
+#undef SHUTDOWN_R
+#undef SHUTDOWN_W
 
 /*/ 1XX informational
-/*/ httpcode SHUTDOWN(){ return httpcode { 0, "Shutdown requested" }; }
+/*/ const httpcode SHUTDOWN = { 0, "Shutdown requested" };
 /*/ 1XX informational
-/*/ httpcode CONTINUE(){ return httpcode { 100, "The request can be continued." }; } /*/
-/*/ httpcode SWITCH_PROTOCOLS(){ return httpcode { 101, "The server has switched protocols in an upgrade header." }; }
+/*/ const httpcode CONTINUE = { 100, "The request can be continued." }; /*/
+/*/ const httpcode SWITCH_PROTOCOLS = { 101, "The server has switched protocols in an upgrade header." };
 /*/ 2XX success
-/*/ httpcode OK(){ return httpcode { 200, "The request completed successfully." }; } /*/
-/*/ httpcode CREATED(){ return httpcode { 201, "The request has been fulfilled and resulted in the creation of a new resource." }; } /*/
-/*/ httpcode ACCEPTED(){ return httpcode { 202, "The request has been accepted for processing, but the processing has not been completed." }; } /*/
-/*/ httpcode PARTIAL(){ return httpcode { 203, "The returned meta information in the entity-header is not the definitive set available from the originating server." }; } /*/
-/*/ httpcode NO_CONTENT(){ return httpcode { 204, "The server has fulfilled the request, but there is no new information to send back." }; } /*/
-/*/ httpcode RESET_CONTENT(){ return httpcode { 205, "The request has been completed, and the client program should reset the document view that caused the request to be sent to allow the user to easily initiate another input action." }; } /*/
-/*/ httpcode PARTIAL_CONTENT(){ return httpcode { 206, "The server has fulfilled the partial GET request for the resource." }; } /*/
-/*/ httpcode WEBDAV_MULTI_STATUS(){ return httpcode { 207, "During a World Wide Web Distributed Authoring and Versioning (WebDAV) operation, this indicates multiple status httpcodes for a single response. The response body contains Extensible Markup Language (XML) that describes the status httpcodes. For more information, see HTTP Extensions for Distributed Authoring." }; }
+/*/ const httpcode OK = { 200, "The request completed successfully." }; /*/
+/*/ const httpcode CREATED = { 201, "The request has been fulfilled and resulted in the creation of a new resource." }; /*/
+/*/ const httpcode ACCEPTED = { 202, "The request has been accepted for processing, but the processing has not been completed." }; /*/
+/*/ const httpcode PARTIAL = { 203, "The returned meta information in the entity-header is not the definitive set available from the originating server." }; /*/
+/*/ const httpcode NO_CONTENT = { 204, "The server has fulfilled the request, but there is no new information to send back." }; /*/
+/*/ const httpcode RESET_CONTENT = { 205, "The request has been completed, and the client program should reset the document view that caused the request to be sent to allow the user to easily initiate another input action." }; /*/
+/*/ const httpcode PARTIAL_CONTENT = { 206, "The server has fulfilled the partial GET request for the resource." }; /*/
+/*/ const httpcode WEBDAV_MULTI_STATUS = { 207, "During a World Wide Web Distributed Authoring and Versioning (WebDAV) operation, this indicates multiple status const httpcodes for a single response. The response body contains Extensible Markup Language (XML) that describes the status const httpcodes. For more information, see HTTP Extensions for Distributed Authoring." };
 /*/ 3XX redirection
-/*/ httpcode AMBIGUOUS(){ return httpcode { 300, "The requested resource is available at one or more locations." }; } /*/
-/*/ httpcode MOVED(){ return httpcode { 301, "The requested resource has been assigned to a new permanent Uniform Resource Identifier (URI), and any future references to this resource should be done using one of the returned URIs." }; } /*/
-/*/ httpcode REDIRECT(){ return httpcode { 302, "The requested resource resides temporarily under a different URI." }; } /*/
-/*/ httpcode REDIRECT_METHOD(){ return httpcode { 303, "The response to the request can be found under a different URI and should be retrieved using a GET HTTP verb on that resource." }; } /*/
-/*/ httpcode NOT_MODIFIED(){ return httpcode { 304, "The requested resource has not been modified." }; } /*/
-/*/ httpcode USE_PROXY(){ return httpcode { 305, "The requested resource must be accessed through the proxy given by the location field." }; } /*/
-/*/ httpcode REDIRECT_KEEP_VERB(){ return httpcode { 307, "The redirected request keeps the same HTTP verb. HTTP/1.1 behavior." }; }
+/*/ const httpcode AMBIGUOUS = { 300, "The requested resource is available at one or more locations." }; /*/
+/*/ const httpcode MOVED = { 301, "The requested resource has been assigned to a new permanent Uniform Resource Identifier (URI), and any future references to this resource should be done using one of the returned URIs." }; /*/
+/*/ const httpcode REDIRECT = { 302, "The requested resource resides temporarily under a different URI." }; /*/
+/*/ const httpcode REDIRECT_METHOD = { 303, "The response to the request can be found under a different URI and should be retrieved using a GET HTTP verb on that resource." }; /*/
+/*/ const httpcode NOT_MODIFIED = { 304, "The requested resource has not been modified." }; /*/
+/*/ const httpcode USE_PROXY = { 305, "The requested resource must be accessed through the proxy given by the location field." }; /*/
+/*/ const httpcode REDIRECT_KEEP_VERB = { 307, "The redirected request keeps the same HTTP verb. HTTP/1.1 behavior." };
 /*/ 4XX client's fault
-/*/ httpcode BAD_REQUEST(){ return httpcode { 400, "The request could not be processed by the server due to invalid syntax." }; } /*/
-/*/ httpcode DENIED(){ return httpcode { 401, "The requested resource requires user authentication." }; } /*/
-/*/ httpcode PAYMENT_REQ(){ return httpcode { 402, "Not implemented in the HTTP protocol." }; } /*/
-/*/ httpcode FORBIDDEN(){ return httpcode { 403, "The server understood the request, but cannot fulfill it." }; } /*/
-/*/ httpcode NOT_FOUND(){ return httpcode { 404, "The server has not found anything that matches the requested URI." }; } /*/
-/*/ httpcode BAD_METHOD(){ return httpcode { 405, "The HTTP verb used is not allowed." }; } /*/
-/*/ httpcode NONE_ACCEPTABLE(){ return httpcode { 406, "No responses acceptable to the client were found." }; } /*/
-/*/ httpcode PROXY_AUTH_REQ(){ return httpcode { 407, "Proxy authentication required." }; } /*/
-/*/ httpcode REQUEST_TIMEOUT(){ return httpcode { 408, "The server timed out waiting for the request." }; } /*/
-/*/ httpcode CONFLICT(){ return httpcode { 409, "The request could not be completed due to a conflict with the current state of the resource. The user should resubmit with more information." }; } /*/
-/*/ httpcode GONE(){ return httpcode { 410, "The requested resource is no longer available at the server, and no forwarding address is known." }; } /*/
-/*/ httpcode LENGTH_REQUIRED(){ return httpcode { 411, "The server cannot accept the request without a defined content length." }; } /*/
-/*/ httpcode PRECOND_FAILED(){ return httpcode { 412, "The precondition given in one or more of the request header fields evaluated to false when it was tested on the server." }; } /*/
-/*/ httpcode REQUEST_TOO_LARGE(){ return httpcode { 413, "The server cannot process the request because the request entity is larger than the server is able to process." }; } /*/
-/*/ httpcode URI_TOO_LONG(){ return httpcode { 414, "The server cannot service the request because the request URI is longer than the server can interpret." }; } /*/
-/*/ httpcode UNSUPPORTED_MEDIA(){ return httpcode { 415, "The server cannot service the request because the entity of the request is in a format not supported by the requested resource for the requested method." }; } /*/
-/*/ httpcode RETRY_WITH(){ return httpcode { 449, "The request should be retried after doing the appropriate action." }; }
+/*/ const httpcode BAD_REQUEST = { 400, "The request could not be processed by the server due to invalid syntax." }; /*/
+/*/ const httpcode DENIED = { 401, "The requested resource requires user authentication." }; /*/
+/*/ const httpcode PAYMENT_REQ = { 402, "Not implemented in the HTTP protocol." }; /*/
+/*/ const httpcode FORBIDDEN = { 403, "The server understood the request, but cannot fulfill it." }; /*/
+/*/ const httpcode NOT_FOUND = { 404, "The server has not found anything that matches the requested URI." }; /*/
+/*/ const httpcode BAD_METHOD = { 405, "The HTTP verb used is not allowed." }; /*/
+/*/ const httpcode NONE_ACCEPTABLE = { 406, "No responses acceptable to the client were found." }; /*/
+/*/ const httpcode PROXY_AUTH_REQ = { 407, "Proxy authentication required." }; /*/
+/*/ const httpcode REQUEST_TIMEOUT = { 408, "The server timed out waiting for the request." }; /*/
+/*/ const httpcode CONFLICT = { 409, "The request could not be completed due to a conflict with the current state of the resource. The user should resubmit with more information." }; /*/
+/*/ const httpcode GONE = { 410, "The requested resource is no longer available at the server, and no forwarding address is known." }; /*/
+/*/ const httpcode LENGTH_REQUIRED = { 411, "The server cannot accept the request without a defined content length." }; /*/
+/*/ const httpcode PRECOND_FAILED = { 412, "The precondition given in one or more of the request header fields evaluated to false when it was tested on the server." }; /*/
+/*/ const httpcode REQUEST_TOO_LARGE = { 413, "The server cannot process the request because the request entity is larger than the server is able to process." }; /*/
+/*/ const httpcode URI_TOO_LONG = { 414, "The server cannot service the request because the request URI is longer than the server can interpret." }; /*/
+/*/ const httpcode UNSUPPORTED_MEDIA = { 415, "The server cannot service the request because the entity of the request is in a format not supported by the requested resource for the requested method." }; /*/
+/*/ const httpcode RETRY_WITH = { 449, "The request should be retried after doing the appropriate action." };
 /*/ 5XX server's fault
-/*/ httpcode SERVER_ERROR(){ return httpcode { 500, "The server encountered an unexpected condition that prevented it from fulfilling the request." }; } /*/
-/*/ httpcode NOT_SUPPORTED(){ return httpcode { 501, "The server does not support the functionality required to fulfill the request." }; } /*/
-/*/ httpcode BAD_GATEWAY(){ return httpcode { 502, "The server, while acting as a gateway or proxy, received an invalid response from the upstream server it accessed in attempting to fulfill the request." }; } /*/
-/*/ httpcode SERVICE_UNAVAIL(){ return httpcode { 503, "The service is temporarily overloaded." }; } /*/
-/*/ httpcode GATEWAY_TIMEOUT(){ return httpcode { 504, "The request was timed out waiting for a gateway." }; } /*/
-/*/ httpcode VERSION_NOT_SUP(){ return httpcode { 505, "The server does not support the HTTP protocol version that was used in the request message." }; }
+/*/ const httpcode SERVER_ERROR = { 500, "The server encountered an unexpected condition that prevented it from fulfilling the request." }; /*/
+/*/ const httpcode NOT_SUPPORTED = { 501, "The server does not support the functionality required to fulfill the request." }; /*/
+/*/ const httpcode BAD_GATEWAY = { 502, "The server, while acting as a gateway or proxy, received an invalid response from the upstream server it accessed in attempting to fulfill the request." }; /*/
+/*/ const httpcode SERVICE_UNAVAIL = { 503, "The service is temporarily overloaded." }; /*/
+/*/ const httpcode GATEWAY_TIMEOUT = { 504, "The request was timed out waiting for a gateway." }; /*/
+/*/ const httpcode VERSION_NOT_SUP = { 505, "The server does not support the HTTP protocol version that was used in the request message." };
 
 }
 
 
-#else
-	$warning( "<tracey/tracey.cpp> says: kTraceyWebserverPort disabled.")
-#   undef  kTraceyWebserverPort
-#   define kTraceyWebserverPort 0
 #endif
 
 // checks: todo
@@ -3185,7 +3662,7 @@ namespace tracey
 		tracey::fail( "<tracey/tracey.cpp> says: error! out of memory" );
 	}
 	std::string version() {
-		return "tracey-0.22.c";  /* format is major.minor.(a)lpha/(b)eta/(c)andidate/(r)elease */
+		return "tracey-0.23.c";  /* format is major.minor.(a)lpha/(b)eta/(c)andidate/(r)elease */
 	}
 	std::string url() {
 		return "https://github.com/r-lyeh/tracey";
@@ -3354,30 +3831,31 @@ static tracey::string get_html_template() {
 }
 
 static void webmain( void *arg ) {
-	$cpp11(
-		if( kTraceyWebserverPort ) {
-			auto response = []() {
-				return get_html_template().
+	if( kTraceyWebserverPort ) {
+
+		struct local {
+			static
+			int GET_root( route66::request &req, std::ostream &headers, std::ostream &content ) {
+				headers << route66::mime(".html");
+				content << get_html_template().
 					replace("{TITLE}", "tracey webserver").
 					replace("{SETTINGS}", pre( tracey::settings("") ) ).
 					replace("{REPORT}", a("generate leak report (may take a while)", "report")).
 					replace("{SUMMARY}",  tracey::summary() );
-			};
-
-			route66::create( kTraceyWebserverPort, "/", [&]( route66::request &req, std::ostream &headers, std::ostream &content ) {
-				headers << route66::mime::html();
-				content << response();
 				return 200;
-			} );
-
-			route66::create( kTraceyWebserverPort, "/report", [&]( route66::request &req, std::ostream &headers, std::ostream &content ) {
-				headers << route66::mime::html();
+			};
+			static
+			int GET_report( route66::request &req, std::ostream &headers, std::ostream &content ) {
+				headers << route66::mime(".html");
 				content << p("Tracey generating report");
 				tracey::view( tracey::report() );
 				return 200;
-			} );
-		}
-	)
+			}
+		};
+
+		route66::create( kTraceyWebserverPort, "GET /", local::GET_root );
+		route66::create( kTraceyWebserverPort, "GET /report", local::GET_report );
+	}
 }
 
 #else
