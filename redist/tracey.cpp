@@ -653,9 +653,10 @@ namespace tracey
             else
             {
                 if( found ) {
-                    //if( kTraceyReportDoubleAllocations )
+                    if( kTraceyReportDoubleAllocations ) {
                         kTraceyPrintf( "%s", (tracey::string( "<tracey/tracey.cpp> says: Error, double pointer allocation. This should never happen" kTraceyCharLinefeed ) +
                             tracey::callstack( true ).flat( kTraceyCharTab "\1) \2" kTraceyCharLinefeed, kTraceyStacktraceSkipBegin) ).c_str() );
+                    }
                     // kTraceyAssert( !map[ptr].first );
                     // kTraceyAssert( !map[ptr].second );
                 }

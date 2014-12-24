@@ -141,29 +141,31 @@ Backend implementation in `tracey.hpp`. Tweak these if needed.
 Backend options in `tracey.hpp`. Tweak these until happy.
 ```c++
 /*/ Tracey uses this value to simulate increased memory simulations (should be >= 1.0)
-/*/ #define kTraceyBudgetOverhead        1.0
+/*/ #define kTraceyBudgetOverhead          1.0
 /*/ Tracey retrieves up to 128 traces by default. The longer the slower, though.
-/*/ #define kTraceyMaxStacktraces        128
+/*/ #define kTraceyMaxStacktraces          128
 /*/ Tracey head position on every stacktrace. It does not skip backtraces by default.
-/*/ #define kTraceyStacktraceSkipBegin   0 // $windows(4) $welse(0)
+/*/ #define kTraceyStacktraceSkipBegin     0 // $windows(4) $welse(0)
 /*/ Tracey tail position on every stacktrace. It does not skip backtraces by default.
-/*/ #define kTraceyStacktraceSkipEnd     0 // $windows(4) $welse(0)
+/*/ #define kTraceyStacktraceSkipEnd       0 // $windows(4) $welse(0)
 /*/ Tracey linefeed character when logging.
-/*/ #define kTraceyCharLinefeed          "\n"
+/*/ #define kTraceyCharLinefeed            "\n"
 /*/ Tracey tab character when logging.
-/*/ #define kTraceyCharTab               "\t"
+/*/ #define kTraceyCharTab                 "\t"
 /*/ When enabled, Tracey warns about deallocations on pointers that have been not allocated by Tracey (wild pointers)
-/*/ #define kTraceyReportWildPointers    0
+/*/ #define kTraceyReportWildPointers      0
+/*/ When enabled, Tracey warns about double allocations on same pointer
+/*/ #define kTraceyReportDoubleAllocations 0
 /*/ When enabled, Tracey memsets memory on mallocs()
-/*/ #define kTraceyMemsetAllocations     1
+/*/ #define kTraceyMemsetAllocations       1
 /*/ When enabled, Tracey shows a report automatically on application exit.
-/*/ #define kTraceyReportOnExit          1
+/*/ #define kTraceyReportOnExit            1
 /*/ When enabled, Tracey is enabled
-/*/ #define kTraceyEnabled               1
+/*/ #define kTraceyEnabled                 1
 /*/ When >0, Tracey web service is enabled. Note: requires C++11
-/*/ #define kTraceyWebserverPort         2001
+/*/ #define kTraceyWebserverPort           2001
 /*/ When enabled, Tracey will hook up C CRT as well (@todo)
-/*/ #define kTraceyHookLegacyCRT         0
+/*/ #define kTraceyHookLegacyCRT           0
 /*/ When >0, Tracey will ignore branches of leaks that are smaller than given percentage. It does not ignore branches by default.
 /*/ #define kTraceyTruncateBranchesSmallerThan 0.0 // 5.0%
 /*/ When enabled, Tracey implements all new/delete operators; else user must use runtime API manually (see below).

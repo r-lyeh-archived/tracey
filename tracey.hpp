@@ -20,6 +20,8 @@
 /*/ #define kTraceyCharTab                     "\t"
 /*/ When enabled, Tracey warns about deallocations on pointers that have been not allocated by Tracey (wild pointers)
 /*/ #define kTraceyReportWildPointers          0
+/*/ When enabled, Tracey warns about double allocations on same pointer
+/*/ #define kTraceyReportDoubleAllocations     0
 /*/ When enabled, Tracey memsets memory on mallocs()
 /*/ #define kTraceyMemsetAllocations           1
 /*/ When enabled, Tracey shows a report automatically on application exit.

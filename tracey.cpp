@@ -3578,9 +3578,10 @@ namespace tracey
 			else
 			{
 				if( found ) {
-					//if( kTraceyReportDoubleAllocations )
+					if( kTraceyReportDoubleAllocations ) {
 						kTraceyPrintf( "%s", (tracey::string( "<tracey/tracey.cpp> says: Error, double pointer allocation. This should never happen" kTraceyCharLinefeed ) +
 							tracey::callstack( true ).flat( kTraceyCharTab "\1) \2" kTraceyCharLinefeed, kTraceyStacktraceSkipBegin) ).c_str() );
+					}
 					// kTraceyAssert( !map[ptr].first );
 					// kTraceyAssert( !map[ptr].second );
 				}
@@ -3662,7 +3663,7 @@ namespace tracey
 		tracey::fail( "<tracey/tracey.cpp> says: error! out of memory" );
 	}
 	std::string version() {
-		return "tracey-0.23.c";  /* format is major.minor.(a)lpha/(b)eta/(c)andidate/(r)elease */
+		return "tracey-0.22.c";  /* format is major.minor.(a)lpha/(b)eta/(c)andidate/(r)elease */
 	}
 	std::string url() {
 		return "https://github.com/r-lyeh/tracey";
