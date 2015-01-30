@@ -215,7 +215,7 @@ Backend options in `tracey.hpp`. Tweak these until happy.
   - Safer behavior on any /MT /MTd /MD /MDd combination (MSVC).
   - Deprecated tinythread mutexes in favor of boost (only in C++03).
   - Simplified mutex locking. Requires compiler with thread-local storage support.
-  - Amalgamated distribution made of code from different sublibraries: [heal](https://github/r-lyeh/heal), [oak](https://github/r-lyeh/oak), [route66](https://github/r-lyeh/route66)
+  - Amalgamated distribution made of code from different sublibraries: [heal](https://github.com/r-lyeh/heal), [oak](https://github.com/r-lyeh/oak), [route66](https://github.com/r-lyeh/route66)
   - Bugfixed wrong branch size on reports.
 - 0.21-b
   - Tracey requires less memory now.
