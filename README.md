@@ -1,4 +1,4 @@
-tracey
+tracey <a href="https://travis-ci.org/r-lyeh/tracey"><img src="https://api.travis-ci.org/r-lyeh/tracey.svg?branch=master" align="right" /></a>
 ======
 
 - Tracey is a C++ static library that reports memory leaks and provides precise stacktraces with no false positives.
