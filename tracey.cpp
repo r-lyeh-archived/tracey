@@ -80,12 +80,11 @@
 
 #include <cassert>
 #include <cctype>
-#include <cstddef>
+// #include <cstddef> // (stddef.h fails on ArchLinux w/ clang 3.4)
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <ctime>
-
 #include <algorithm>
 #include <deque>
 #include <fstream>
@@ -107,16 +106,17 @@
 // external; tree implementation {
 
 //#line 1 "oak.hpp"
-// a simple tree container
-// rlyeh. BOOST licensed
+// a simple tree container, BOOST licensed.
+// - rlyeh ~~ listening to Buckethead - The Moltrail #2
 
 //#pragma once
 #include <cassert>
 
 #include <algorithm>
+#include <functional>
 #include <iostream>
 #include <map>
-#include <set>
+#include <sstream>
 #include <string>
 
 namespace oak
@@ -125,15 +125,15 @@ namespace oak
 	// [] means read-writeable (so is <<)
 	// () means read-only access
 
-	template< typename K, typename V = int >
-	class tree : public std::map< K, tree<K,V> > {
+	template< typename K, typename V = int, typename P = std::less< K > >
+	class tree : public std::map< K, tree<K,V,P>, P > {
 
 			enum { OAK_VERBOSE = false };
 
-			typedef typename std::map< K, tree<K,V> > map;
+			typedef typename std::map< K, tree<K,V,P>, P > map;
 
 			template< typename T >
-			T zero() {
+			T zero() const {
 				return std::pair<T,T>().first;
 			}
 
@@ -306,6 +306,19 @@ namespace oak
 			}
 
 			// tools
+
+			template<typename ostream>
+			void csv( ostream &cout = std::cout, const std::string &prefix = std::string(), unsigned depth = 0 ) const {
+				for( typename tree::const_iterator it = this->begin(), end = this->end(); it != end; ++it ) {
+					cout << prefix << "/" << it->first << "," << it->second.get() << std::endl;
+					it->second.csv( cout, prefix + "/" + it->first, depth + 1 );
+				}
+			}
+
+			std::string as_csv() const {
+				std::stringstream ss;
+				return csv( ss ), ss.str();
+			}
 
 			template<typename ostream>
 			void print( ostream &cout = std::cout, unsigned depth = 0 ) const {
@@ -499,6 +512,9 @@ namespace oak
 
 /* Public API */
 
+#if defined(_WIN32) && _MSC_VER > 1600
+#	include <eh.h>
+#endif
 #include <cassert>
 
 #if !(defined(NDEBUG) || defined(_NDEBUG))
@@ -1160,7 +1176,7 @@ $msvc(
 
 // INFO MESSAGES
 // Reminders for retrieving symbols
-
+/*
 #  if $on($msvc)
 	$warning( "<heal/heal.cpp> says: do not forget /Zi, /Z7 or /C7 compiler settings! /Oy- also helps!" )
 #elif $on($clang)
@@ -1168,7 +1184,7 @@ $msvc(
 #elif $on($gnuc)
 	$warning( "<heal/heal.cpp> says: do not forget -g -lpthread compiler settings!" )
 #endif
-
+*/
 // ASSERT
 
 namespace heal {
@@ -1380,13 +1396,14 @@ bool debugger( const std::string &reason )
 // os based
 
 	$windows(
-		if( IsDebuggerPresent() )
-			int(), true;
+		if( IsDebuggerPresent() ) {
+			return breakpoint(), true;
+		}
 	)
 
 	$linux(
 		if( detect_gdb() ) {
-			int(), true;
+			return breakpoint(), true;
 		}
 		// else try to invoke && attach to current process
 
@@ -1938,7 +1955,7 @@ std::string prompt( const std::string &current_value, const std::string &title, 
 #if $on($windows)
 #   pragma comment(lib,"user32.lib")
 #   pragma comment(lib,"gdi32.lib")
-$warning("<heal/heal.cpp> says: dialog aware dpi fix (@todo)")
+//$warning("<heal/heal.cpp> says: dialog aware dpi fix (@todo)")
 
 std::string prompt( const std::string &current_value, const std::string &title, const std::string &caption )
 {
@@ -2273,6 +2290,21 @@ namespace std {
 #   include <ws2tcpip.h>
 #   include <windows.h>
 
+#   ifndef _MSC_VER
+	static
+	const char* inet_ntop(int af, const void* src, char* dst, int cnt){
+		struct sockaddr_in srcaddr;
+		memset(&srcaddr, 0, sizeof(struct sockaddr_in));
+		memcpy(&(srcaddr.sin_addr), src, sizeof(srcaddr.sin_addr));
+		srcaddr.sin_family = af;
+		if (WSAAddressToString((struct sockaddr*) &srcaddr, sizeof(struct sockaddr_in), 0, dst, (LPDWORD) &cnt) != 0) {
+			DWORD rv = WSAGetLastError();
+			return NULL;
+		}
+		return dst;
+	}
+#   endif
+
 #   pragma comment(lib,"ws2_32.lib")
 
 #   define INIT()                    do { static WSADATA wsa_data; static const int init = WSAStartup( MAKEWORD(2, 2), &wsa_data ); } while(0)
@@ -2332,7 +2364,7 @@ namespace std {
 #   include <netdb.h>
 #   include <unistd.h>    //close
 
-#   include <arpa/inet.h> //inet_addr
+#   include <arpa/inet.h> //inet_addr, inet_ntop
 
 #   define INIT()                    do {} while(0)
 #   define SOCKET(A,B,C)             ::socket((A),(B),(C))
@@ -2356,7 +2388,8 @@ namespace std {
 #endif
 
 #include <cstdlib>
-#include <cstdio>
+#include <cstring>
+#include <limits.h>
 
 #include <fstream>
 #include <map>
@@ -2569,7 +2602,7 @@ namespace {
 	}
 	bool match( const char *pattern, const char *str ) {
 		if( *pattern=='\0' ) return !*str;
-		if( *pattern=='*' )  return match(pattern+1, str) || *str && match(pattern, str+1);
+		if( *pattern=='*' )  return match(pattern+1, str) || (*str && match(pattern, str+1));
 		if( *pattern=='?' )  return *str && (*str != '.') && match(pattern+1, str+1);
 		return (*str == *pattern) && match(pattern+1, str+1);
 	}
@@ -2790,7 +2823,7 @@ struct daemon {
 				getpeername(child, (struct sockaddr*) &addr, &len);
 				struct sockaddr_in *s = (struct sockaddr_in *) &addr;
 				inet_ntop(AF_INET, &s->sin_addr, ipstr, sizeof ipstr);
-				if( strcmp("127.0.0.1", ipstr) == 0 ) rq.ip = "localhost";
+				if( std::strcmp("127.0.0.1", ipstr) == 0 ) rq.ip = "localhost";
 				else rq.ip = ipstr;
 
 				struct sockaddr_in l;
@@ -2911,7 +2944,7 @@ namespace {
 			}
 
 			struct sockaddr_in l;
-			memset( &l, 0, sizeof(sockaddr_in) );
+			std::memset( &l, 0, sizeof(sockaddr_in) );
 			l.sin_family = AF_INET;
 			l.sin_port = htons(port);
 			l.sin_addr.s_addr = INADDR_ANY;
@@ -3663,7 +3696,7 @@ namespace tracey
 		tracey::fail( "<tracey/tracey.cpp> says: error! out of memory" );
 	}
 	std::string version() {
-		return "tracey-0.22.c";  /* format is major.minor.(a)lpha/(b)eta/(c)andidate/(r)elease */
+		return "tracey-0.24.c";  /* format is major.minor.(a)lpha/(b)eta/(c)andidate/(r)elease */
 	}
 	std::string url() {
 		return "https://github.com/r-lyeh/tracey";

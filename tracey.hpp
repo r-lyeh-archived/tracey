@@ -63,9 +63,9 @@
 /*/ Default wrapper to fprintf()
 /*/ #define kTraceyfPrintf          std::fprintf
 
-/*/ size_t header
+/*/ size_t header (stddef.h fails on ArchLinux w/ clang 3.4)
 /*/ 
-#include <stddef.h>
+#include <stdio.h>
 
 #ifdef __cplusplus
 

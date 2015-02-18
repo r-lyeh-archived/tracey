@@ -80,12 +80,11 @@
 
 #include <cassert>
 #include <cctype>
-#include <cstddef>
+// #include <cstddef> // (stddef.h fails on ArchLinux w/ clang 3.4)
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <ctime>
-
 #include <algorithm>
 #include <deque>
 #include <fstream>
@@ -739,7 +738,7 @@ namespace tracey
         tracey::fail( "<tracey/tracey.cpp> says: error! out of memory" );
     }
     std::string version() {
-        return "tracey-0.22.c";  /* format is major.minor.(a)lpha/(b)eta/(c)andidate/(r)elease */
+        return "tracey-0.24.c";  /* format is major.minor.(a)lpha/(b)eta/(c)andidate/(r)elease */
     }
     std::string url() {
         return "https://github.com/r-lyeh/tracey";

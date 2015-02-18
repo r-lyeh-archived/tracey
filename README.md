@@ -206,6 +206,8 @@ Backend options in `tracey.hpp`. Tweak these until happy.
 - @todoc
 
 ### Changelog
+- 0.24-c
+  - Upgraded submodules
 - 0.23-c
   - Webserver support (w/ C++03)
 - 0.22-c
