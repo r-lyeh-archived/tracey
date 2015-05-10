@@ -10,7 +10,7 @@ tracey <a href="https://travis-ci.org/r-lyeh/tracey"><img src="https://api.travi
 - Tracey is handy. Generates HTML logs that can be collapsed per branch in [Sublime Text 2](http://sublimetext.com) and related editors.
 - Tracey is cross-platform. Builds on Windows/Linux/MacosX. Compiles on g++/clang/msvc.
 - Tracey is stand-alone. OS dependencies only. No third party dependencies.
-- Tracey is BOOST licensed.
+- Tracey is zlib/libpng licensed.
 
 ### cons
 - No hooks for `malloc()`/`free()`. Tracey supports `new`/`delete` C++ memory operators only (atm).

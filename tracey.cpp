@@ -106,7 +106,7 @@
 // external; tree implementation {
 
 //#line 1 "oak.hpp"
-// a simple tree container, BOOST licensed.
+// a simple tree container, zlib/libpng licensed.
 // - rlyeh ~~ listening to Buckethead - The Moltrail #2
 
 //#pragma once
@@ -506,7 +506,7 @@ namespace oak
 //#line 1 "heal.hpp"
 // -- 8< -- 8< -- 8< -- 8< -- 8< -- 8< -- 8< -- 8< -- 8< -- 8< -- 8< -- 8< -- 8< -- 8< -- 8< -- 8< -- 8< -- 8< -- 8< -- 8< --
 
-/* Smart assert replacement for LHS/RHS values. BOOST licensed.
+/* Smart assert replacement for LHS/RHS values. zlib/libpng licensed.
  * - rlyeh ~~ listening to Tuber / Desert Overcrowded
  */
 
@@ -587,7 +587,7 @@ namespace assertpp {
 // -- 8< -- 8< -- 8< -- 8< -- 8< -- 8< -- 8< -- 8< -- 8< -- 8< -- 8< -- 8< -- 8< -- 8< -- 8< -- 8< -- 8< -- 8< -- 8< -- 8< --
 
 // std 11 <-> 03/w-boost bridge compatiblity layer, plus a few macro utils.
-// - rlyeh, boost licensed.
+// - rlyeh, zlib/libpng licensed.
 
 #ifndef __BRIDGE_HPP__
 #define __BRIDGE_HPP__
@@ -1909,7 +1909,7 @@ std::string timestamp() {
 }
 
 /*
- * Simple prompt dialog (based on legolas558's code). BOOST license.
+ * Simple prompt dialog (based on legolas558's code). zlib/libpng license.
  * - rlyeh
  */
 
@@ -2280,7 +2280,7 @@ namespace std {
 
 //#line 1 "route66.cpp"
 // lightweight http server
-// - rlyeh, BOOST licensed. based on code by Ivan Tikhonov (zlib licensed)
+// - rlyeh, zlib/libpng licensed. based on code by Ivan Tikhonov (zlib licensed)
 
 // Sockets, taken from https://github.com/r-lyeh/knot
 
@@ -2400,7 +2400,7 @@ namespace std {
 
 //#line 1 "route66.hpp"
 // lightweight http server
-// - rlyeh, BOOST licensed. based on code by Ivan Tikhonov (zlib licensed)
+// - rlyeh, zlib/libpng licensed. based on code by Ivan Tikhonov (zlib licensed)
 
 /**/// <-- remove an asterisk in a code editor to highlight API
 
