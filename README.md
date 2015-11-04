@@ -206,6 +206,9 @@ Backend options in `tracey.hpp`. Tweak these until happy.
 - @todoc
 
 ### Changelog
+- v1.0.0 (2015/11/04) 
+  - Initial semantic versioning adherence
+  - Fix 64-bit
 - 0.24-c
   - Upgraded submodules
 - 0.23-c

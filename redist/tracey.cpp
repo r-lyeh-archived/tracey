@@ -1,11 +1,6 @@
-/*
- * Tracey, a simple and lightweight memory leak detector
- * Copyright (c) 2011,2012,2013,2014 Mario 'rlyeh' Rodriguez
- *
- * Callstack code is based on Magnus Norddahl's work (ClanLib).
-
- * Distributed under the Boost Software License, Version 1.0.
- * (See license copy at http://www.boost.org/LICENSE_1_0.txt)
+/* Tracey, a simple and lightweight memory leak detector
+ * Copyright (c) 2011,2012,2013,2014 r-lyeh
+ * ZLIB/LibPNG licensed.
 
  * Features:
  * - tiny
@@ -738,7 +733,7 @@ namespace tracey
         tracey::fail( "<tracey/tracey.cpp> says: error! out of memory" );
     }
     std::string version() {
-        return "tracey-0.24.c";  /* format is major.minor.(a)lpha/(b)eta/(c)andidate/(r)elease */
+        return "tracey-" TRACEY_VERSION;  /* format is apibreak.apienhacement.fixes */
     }
     std::string url() {
         return "https://github.com/r-lyeh/tracey";

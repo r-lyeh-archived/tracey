@@ -1,5 +1,12 @@
+/* Tracey, a simple and lightweight memory leak detector
+ * Copyright (c) 2011,2012,2013,2014 r-lyeh
+ * ZLIB/LibPNG licensed.
+ */
+
 #ifndef TRACEY_H
 #define TRACEY_H
+
+#define TRACEY_VERSION "1.0.0" /* (2015/11/04) Initial semantic versioning adherence; Fix 64-bit */
 
 /*/ Remove this asterisk to highlight API --> */
 

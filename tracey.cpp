@@ -1,11 +1,6 @@
-/*
- * Tracey, a simple and lightweight memory leak detector
- * Copyright (c) 2011,2012,2013,2014 Mario 'rlyeh' Rodriguez
- *
- * Callstack code is based on Magnus Norddahl's work (ClanLib).
-
- * Distributed under the Boost Software License, Version 1.0.
- * (See license copy at http://www.boost.org/LICENSE_1_0.txt)
+/* Tracey, a simple and lightweight memory leak detector
+ * Copyright (c) 2011,2012,2013,2014 r-lyeh
+ * ZLIB/LibPNG licensed.
 
  * Features:
  * - tiny
@@ -111,7 +106,6 @@
 
 //#pragma once
 #include <cassert>
-
 #include <algorithm>
 #include <functional>
 #include <iostream>
@@ -119,16 +113,21 @@
 #include <sstream>
 #include <string>
 
+#define OAK_VERSION "1.0.0" // (2015/10/25) Semantic versioning adherence; fix csv() with non-string keys
+
 namespace oak
 {
+	// config
+#   ifndef OAK_VERBOSE
+		enum { OAK_VERBOSE = false };
+#   endif
+
 	// tree class
 	// [] means read-writeable (so is <<)
 	// () means read-only access
 
 	template< typename K, typename V = int, typename P = std::less< K > >
 	class tree : public std::map< K, tree<K,V,P>, P > {
-
-			enum { OAK_VERBOSE = false };
 
 			typedef typename std::map< K, tree<K,V,P>, P > map;
 
@@ -311,7 +310,9 @@ namespace oak
 			void csv( ostream &cout = std::cout, const std::string &prefix = std::string(), unsigned depth = 0 ) const {
 				for( typename tree::const_iterator it = this->begin(), end = this->end(); it != end; ++it ) {
 					cout << prefix << "/" << it->first << "," << it->second.get() << std::endl;
-					it->second.csv( cout, prefix + "/" + it->first, depth + 1 );
+					std::stringstream ss;
+					ss << prefix << "/" << it->first;
+					it->second.csv( cout, ss.str(), depth + 1 );
 				}
 			}
 
@@ -421,6 +422,14 @@ namespace oak
 #   define heal tracey_heal
 
 //#line 1 "heal.cpp"
+// Heal is a lightweight C++ framework to aid and debug applications.
+// - rlyeh, zlib/libpng licensed // ~listening to Kalas - Monuments to Ruins
+
+// Callstack code is based on code by Magnus Norddahl (See http://goo.gl/LM5JB)
+// Mem/CPU OS code is based on code by David Robert Nadeau (See http://goo.gl/8P5Jqv)
+// Distributed under Creative Commons Attribution 3.0 Unported License
+// http://creativecommons.org/licenses/by/3.0/deed.en_US
+
 // A few tweaks before loading STL on MSVC
 // This improves stack unwinding.
 
@@ -441,6 +450,9 @@ namespace oak
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+
+#define __STDC_FORMAT_MACROS
+#include <inttypes.h>
 
 #include <algorithm>
 #include <iostream>
@@ -504,86 +516,6 @@ namespace oak
 
 
 //#line 1 "heal.hpp"
-// -- 8< -- 8< -- 8< -- 8< -- 8< -- 8< -- 8< -- 8< -- 8< -- 8< -- 8< -- 8< -- 8< -- 8< -- 8< -- 8< -- 8< -- 8< -- 8< -- 8< --
-
-/* Smart assert replacement for LHS/RHS values. zlib/libpng licensed.
- * - rlyeh ~~ listening to Tuber / Desert Overcrowded
- */
-
-/* Public API */
-
-#if defined(_WIN32) && _MSC_VER > 1600
-#	include <eh.h>
-#endif
-#include <cassert>
-
-#if !(defined(NDEBUG) || defined(_NDEBUG))
-#undef  assert
-#define assert(...) ( bool(__VA_ARGS__) ? \
-		( assertpp::check(#__VA_ARGS__,__FILE__,__LINE__,1) < __VA_ARGS__ ) : \
-		( assertpp::check(#__VA_ARGS__,__FILE__,__LINE__,0) < __VA_ARGS__ ) )
-#endif
-
-/* Private API */
-
-#ifndef ASSERTPP_HEADER
-#define ASSERTPP_HEADER
-
-#include <cassert>
-#include <cstdio>
-#include <cstdlib>
-
-#include <deque>
-#include <string>
-#include <sstream>
-
-namespace assertpp {
-	class check {
-		bool ok;
-		std::deque< std::string > xpr;
-		template<typename T> static std::string to_str( const T &t ) { std::stringstream ss; return (ss << t) ? ss.str() : "??"; }
-	public:
-		check( const char *const text, const char *const file, int line, bool result )
-		:   xpr(4), ok(result)
-		{ xpr[0] = std::string(file) + ':' + to_str(line); xpr[2] = text; }
-
-		~check() {
-			if( xpr.empty() ) return;
-			operator bool();
-			xpr[0] = xpr[0] + xpr[1];
-			xpr.erase( xpr.begin() + 1 );
-			if( !ok ) {
-				xpr[2] = xpr[2].substr( xpr[2][2] == ' ' ? 3 : 4 );
-				xpr[1].resize( (xpr[1] != xpr[2]) * xpr[1].size() );
-				std::string buf;
-				buf = "<assert++> says: expression failed! (" + xpr[1] + ") -> (" + xpr[2] + ") -> (unexpected) at " + xpr[0] + "\n";
-				fprintf(stderr, "%s", buf.c_str() );
-				// assert fallback here
-				fclose( stderr );
-				fclose( stdout );
-				assert( !"<assert++> says: expression failed!" );
-				// user defined fallbacks here
-				for(;;) {}
-			};
-		}
-#       define assert$impl(OP) \
-		template<typename T> check &operator OP( const T &rhs         ) { return xpr[3] += " "#OP" " + to_str(rhs), *this; } \
-		template<unsigned N> check &operator OP( const char (&rhs)[N] ) { return xpr[3] += " "#OP" " + to_str(rhs), *this; }
-		operator bool() {
-			if( xpr.size() >= 3 && xpr[3].size() >= 6 ) {
-				char sign = xpr[3].at(xpr[3].size()/2+1);
-				bool equal = xpr[3].substr( 4 + xpr[3].size()/2 ) == xpr[3].substr( 3, xpr[3].size()/2 - 3 );
-				ok = ( sign == '=' ? equal : ( sign == '!' ? !equal : ok ) );
-			} return ok;
-		}
-		assert$impl( <); assert$impl(<=); assert$impl( >); assert$impl(>=); assert$impl(!=); assert$impl(==); assert$impl(^=);
-		assert$impl(&&); assert$impl(&=); assert$impl(& ); assert$impl(||); assert$impl(|=); assert$impl(| ); assert$impl(^ );
-#       undef assert$impl
-	};
-}
-
-#endif // ASSERTPP_HEADER
-
 // -- 8< -- 8< -- 8< -- 8< -- 8< -- 8< -- 8< -- 8< -- 8< -- 8< -- 8< -- 8< -- 8< -- 8< -- 8< -- 8< -- 8< -- 8< -- 8< -- 8< --
 
 // std 11 <-> 03/w-boost bridge compatiblity layer, plus a few macro utils.
@@ -677,12 +609,28 @@ namespace std {
 
 // Compiler utils
 
-#if defined(NDEBUG) || defined(_NDEBUG)
+#if ULONG_MAX == 4294967295
+#   define $bits64    $yes
+#   define $bits32    $no
+#else
+#   define $bits64    $no
+#   define $bits32    $yes
+#endif
+
+#if defined(NDEBUG) || defined(_NDEBUG) || defined(RELEASE)
 #   define $release   $yes
 #   define $debug     $no
 #else
 #   define $release   $no
 #   define $debug     $yes
+#endif
+
+#if defined(NDEVEL) || defined(_NDEVEL) || defined(PUBLIC)
+#   define $public    $yes
+#   define $devel     $no
+#else
+#   define $public    $no
+#   define $devel     $yes
 #endif
 
 #if defined(__GNUC__) || defined(__MINGW32__)
@@ -721,6 +669,14 @@ namespace std {
 #   define $undefined_os $yes
 #endif
 
+#if $on($gnuc) || $on($clang)
+#   define $likely(expr)    (__builtin_expect(!!(expr), 1))
+#   define $unlikely(expr)  (__builtin_expect(!!(expr), 0))
+#else
+#   define $likely(expr)    ((expr))
+#   define $unlikely(expr)  ((expr))
+#endif
+
 // try to detect if exceptions are enabled...
 
 #if (defined(_HAS_EXCEPTIONS) && (_HAS_EXCEPTIONS > 0)) || \
@@ -757,22 +713,19 @@ namespace std {
 
 // -- 8< -- 8< -- 8< -- 8< -- 8< -- 8< -- 8< -- 8< -- 8< -- 8< -- 8< -- 8< -- 8< -- 8< -- 8< -- 8< -- 8< -- 8< -- 8< -- 8< --
 
-/*
- * Heal is a lightweight C++ framework to aid and debug applications.
- * Copyright (c) 2011, 2012, 2013, 2014 Mario 'rlyeh' Rodriguez
+// Heal is a lightweight C++ framework to aid and debug applications.
+// - rlyeh, zlib/libpng licensed // ~listening to Kalas - Monuments to Ruins
 
- * Callstack code is based on code by Magnus Norddahl (See http://goo.gl/LM5JB)
- * Mem/CPU OS code is based on code by David Robert Nadeau (See http://goo.gl/8P5Jqv)
-
- * Distributed under the Boost Software License, Version 1.0.
- * (See license copy at http://www.boost.org/LICENSE_1_0.txt)
-
- * - rlyeh // ~listening to Kalas - Monuments to Ruins
- */
+// Callstack code is based on code by Magnus Norddahl (See http://goo.gl/LM5JB)
+// Mem/CPU OS code is based on code by David Robert Nadeau (See http://goo.gl/8P5Jqv)
+// Distributed under Creative Commons Attribution 3.0 Unported License
+// http://creativecommons.org/licenses/by/3.0/deed.en_US
 
 #ifndef __HEALHPP__
 #define __HEALHPP__
 
+#include <inttypes.h>
+#include <stdint.h>
 #include <stdio.h>
 
 #include <iostream>
@@ -782,6 +735,8 @@ namespace std {
 #include <string>
 #include <vector>
 #include <deque>
+
+#define HEAL_VERSION "1.0.0" // (2015/10/01) Semantic versioning adherence and clean ups
 
 /* public API */
 
@@ -819,6 +774,9 @@ namespace heal {
 	bool is_debug();
 	bool is_release();
 	bool is_asserting();
+
+	bool is_devel();
+	bool is_public();
 
 	#ifndef HEAL_MAX_TRACES
 	#define HEAL_MAX_TRACES 128
@@ -905,7 +863,11 @@ namespace heal {
 	}
 
 	std::string timestamp();
+}
 
+#endif // __HEALHPP__
+
+namespace heal {
 	// sfstring is a safe string replacement that does not rely on stringstream
 	// this is actually safer on corner cases, like crashes, exception unwinding and in exit conditions
 	class sfstring : public std::string
@@ -945,43 +907,46 @@ namespace heal {
 			char buf[128];
 			if( sprintf(buf, "%d", t ) > 0 ) this->assign(buf);
 		}
-		sfstring( const unsigned long &t ) : std::string() {
+		sfstring( const uint16_t &t ) : std::string() {
 			char buf[128];
-			if( sprintf(buf, "%lu", t ) > 0 ) this->assign(buf);
+			if( sprintf(buf, "%" SCNu16, t ) > 0 ) this->assign(buf);
 		}
-		sfstring( const unsigned long long &t ) : std::string() {
+		sfstring( const uint32_t &t ) : std::string() {
 			char buf[128];
-			if( sprintf(buf, "%llu", t ) > 0 ) this->assign(buf);
+			if( sprintf(buf, "%" SCNu32, t ) > 0 ) this->assign(buf);
 		}
-$msvc(
-		sfstring( const size_t &t ) : std::string() {
+		sfstring( const uint64_t &t ) : std::string() {
 			char buf[128];
-			if( sprintf(buf, "%lu", t ) > 0 ) this->assign(buf);
+			if( sprintf(buf, "%" SCNu64, t ) > 0 ) this->assign(buf);
 		}
-)
-
 		sfstring( const float &t ) : std::string() {
 			char buf[128];
 			if( sprintf(buf, "%f", t ) > 0 ) this->assign(buf);
 		}
 		sfstring( const double &t ) : std::string() {
 			char buf[128];
-			if( sprintf(buf, "%f", t ) > 0 ) this->assign(buf);
+			if( sprintf(buf, "%lf", t ) > 0 ) this->assign(buf);
 		}
+$msvc(
+		sfstring( const DWORD &t ) : std::string() {
+			char buf[128];
+			if( sprintf(buf, "%" SCNu32, t ) > 0 ) this->assign(buf);
+		}
+)
 
+		sfstring( char *t ) : std::string( t ? t : "" )
+		{}
 		sfstring( const char *t ) : std::string( t ? t : "" )
 		{}
+
 		sfstring( void *t ) : std::string() {
 			char buf[128];
 			if( sprintf(buf, "%p", t ) > 0 ) this->assign(buf);
 		}
-
 		sfstring( const void *t ) : std::string() {
 			char buf[128];
 			if( sprintf(buf, "%p", t ) > 0 ) this->assign(buf);
 		}
-		sfstring( char *t ) : std::string( t ? t : "" )
-		{}
 #endif
 
 		// extended constructors; safe formatting
@@ -1130,49 +1095,7 @@ $msvc(
 			return str( "\1" );
 		}
 	};
-
-	/*
-	 * determined on this OS.
-	 */
-	size_t get_mem_peak();
-
-	/**
-	 * Returns the current resident set size (physical memory use) measured
-	 * in bytes, or zero if the value cannot be determined on this OS.
-	 */
-	size_t get_mem_current();
-
-	/**
-	 * Returns the size of physical memory (RAM) in bytes.
-	 */
-	size_t get_mem_size();
-
-	/**
-	 * Returns the amount of CPU time used by the current process,
-	 * in seconds, or -1.0 if an error occurred.
-	 */
-	double get_time_cpu();
-
-	/**
-	 * Returns the real time, in seconds, or -1.0 if an error occurred.
-	 *
-	 * Time is measured since an arbitrary and OS-dependent start time.
-	 * The returned real time is only useful for computing an elapsed time
-	 * between two calls to this function.
-	 */
-	double get_time_clock();
-
-	std::string human_size( size_t bytes );
-	std::string human_time( double time );
-
-	std::string get_mem_peak_str();
-	std::string get_mem_current_str();
-	std::string get_mem_size_str();
-	std::string get_time_cpu_str();
-	std::string get_time_clock_str();
 }
-
-#endif // __HEALHPP__
 
 // INFO MESSAGES
 // Reminders for retrieving symbols
@@ -1234,18 +1157,7 @@ void fail( const std::string &error ) {
 	}
 }
 
-bool is_asserting()
-{
-	/*
-	static bool enabled = ( enabled = false, assert( enabled ^= true ), enabled );
-	return enabled;
-	*/
-	/*
-	static struct once { bool are_enabled; once() : are_enabled(false) {
-		assert( are_enabled ^= true );
-	} } asserts;
-	return asserts.are_enabled;
-	*/
+bool is_asserting() {
 	bool asserting = false;
 	assert( asserting |= true );
 	return asserting;
@@ -1255,20 +1167,17 @@ bool is_asserting()
 // IS_RELEASE
 
 bool is_debug() {
-	$debug(
-	return true;
-	)
-	$release(
-	return false;
-	)
+	return $debug(true) $release(false);
 }
 bool is_release() {
-	$release(
-	return true;
-	)
-	$debug(
-	return false;
-	)
+	return !is_debug();
+}
+
+bool is_devel() {
+	return $devel(true) $public(false);
+}
+bool is_public() {
+	return !is_devel();
 }
 
 // DEBUGGER
@@ -1840,13 +1749,12 @@ std::string hexdump( const void *data, size_t num_bytes, const void *self )
 		}
 	};
 
-	using std::max;
 	unsigned maxwidth = 80;
 	unsigned width = 16; //column width
 	unsigned width_offset_block = (8 + 1);
 	unsigned width_chars_block  = (width * 3 + 1) + sizeof("asc");
 	unsigned width_hex_block    = (width * 3 + 1) + sizeof("hex");
-	unsigned width_padding = max( 0, int( maxwidth - ( width_offset_block + width_chars_block + width_hex_block ) ) );
+	unsigned width_padding = (std::max)( 0, int( maxwidth - ( width_offset_block + width_chars_block + width_hex_block ) ) );
 	unsigned blocks = width_padding / ( width_chars_block + width_hex_block ) ;
 
 	unsigned dumpsize = ( num_bytes < width * 16 ? num_bytes : width * 16 ); //16 lines max
@@ -3696,7 +3604,7 @@ namespace tracey
 		tracey::fail( "<tracey/tracey.cpp> says: error! out of memory" );
 	}
 	std::string version() {
-		return "tracey-0.24.c";  /* format is major.minor.(a)lpha/(b)eta/(c)andidate/(r)elease */
+		return "tracey-" TRACEY_VERSION;  /* format is apibreak.apienhacement.fixes */
 	}
 	std::string url() {
 		return "https://github.com/r-lyeh/tracey";
